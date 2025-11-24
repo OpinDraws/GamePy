@@ -6,7 +6,8 @@ from config import *
 from player import Player
 from enemy import Enemy
 from vfx import ScreenShake
-
+from rendering.ui_render import draw_archangel_portrait
+from rendering.background import generate_cave_background
 from entities.archangel_boss import ArchangelBoss 
 from rendering.archangel_render import draw_archangel_boss
 
@@ -47,10 +48,42 @@ class Game:
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("Gothic Procedural Arena - ARCHANGEL BOSS")
         self.clock = pygame.time.Clock()
+
+        # --- ГЕНЕРАЦИЯ ФОНА ---
+        print("Генерирую пещеру...")
+        self.cave_bg = generate_cave_background()
+        print("Готово.")
+        
+        # --- ШРИФТЫ (ИСПРАВЛЕНО) ---
+        # Передаем список шрифтов ОДНОЙ строкой через запятую
+        serif_font_path = pygame.font.match_font('cambria, georgia, timesnewroman, serif')
+        
+        # Если шрифт не найден, match_font вернет None, и Pygame использует стандартный шрифт
+        # Шрифт для Имени (Крупный)
+        self.font_boss_name = pygame.font.Font(serif_font_path, 28)
+        self.font_boss_name.set_bold(True)
+        
+        # Шрифт для Титула (Поменьше)
+        self.font_boss_title = pygame.font.Font(serif_font_path, 18)
+        self.font_boss_title.set_italic(True)
+        
+        # Обычный шрифт для отладки
         self.font = pygame.font.SysFont("Arial", 18)
         
+        # --- ЗАГРУЗКА ПОРТРЕТА ---
+        try:
+            original_image = pygame.image.load('boss_icon.jpg').convert()
+            self.boss_portrait = pygame.transform.smoothscale(original_image, (80, 80))
+            # Разворачиваем, чтобы смотрела влево (на поле боя)
+            self.boss_portrait = pygame.transform.flip(self.boss_portrait, True, False)
+        except:
+            print("Ошибка: файл boss_icon.jpg не найден. Создаю заглушку.")
+            self.boss_portrait = pygame.Surface((80, 80))
+            self.boss_portrait.fill((50, 0, 50))
+
         self.screen_shake = ScreenShake()
         
+        # Очистка групп спрайтов
         all_sprites.empty()
         bullets.empty()
         enemies.empty()
@@ -64,11 +97,107 @@ class Game:
             self.screen_shake.shake
         )
         
-        # Спавн Архангела
         self.boss = ArchangelBoss(WIDTH/2, HEIGHT/2 - 300, self.player)
-        
         self.spawn_timer = 0
-        self.spawn_rate = 9999999  # Отключаем монстров
+        self.spawn_rate = 9999999
+
+    def draw_boss_hud(self):
+        """Отрисовка красивого интерфейса босса."""
+        if not self.boss.alive():
+            return
+
+        # Настройки расположения (Правый верхний угол)
+        margin_right = 20
+        margin_top = 20
+        
+        # Размеры
+        p_size = 80 # Размер портрета
+        bar_width = 300
+        bar_height = 12
+        
+        # Координаты портрета
+        p_x = WIDTH - margin_right - p_size
+        p_y = margin_top
+        
+        # Цвета
+        C_GOLD = (218, 165, 32)
+        C_GOLD_DARK = (184, 134, 11)
+        C_DARK_BG = (20, 15, 25)
+        C_HP_BG = (40, 10, 10)
+        C_HP_FILL = (180, 30, 30)
+        C_HP_GLOW = (220, 80, 80)
+        
+        # --- 1. ФОН ПОРТРЕТА И РАМКА ---
+        # Темная подложка
+        pygame.draw.rect(self.screen, C_DARK_BG, (p_x, p_y, p_size, p_size))
+        # Сам портрет
+        self.screen.blit(self.boss_portrait, (p_x, p_y))
+        
+        # Декоративная рамка (Двойной контур)
+        pygame.draw.rect(self.screen, C_GOLD, (p_x-2, p_y-2, p_size+4, p_size+4), 2)
+        pygame.draw.rect(self.screen, C_GOLD_DARK, (p_x-5, p_y-5, p_size+10, p_size+10), 1)
+        
+        # Уголки (ромбики) на рамке для готичности
+        corners = [
+            (p_x-2, p_y-2), (p_x+p_size+2, p_y-2),
+            (p_x-2, p_y+p_size+2), (p_x+p_size+2, p_y+p_size+2)
+        ]
+        for cx, cy in corners:
+            pygame.draw.circle(self.screen, C_GOLD, (cx, cy), 4)
+            pygame.draw.circle(self.screen, (0,0,0), (cx, cy), 2)
+
+        # --- 2. ИМЯ И ТИТУЛ ---
+        name_text = "Ресалаида"
+        title_text = "Хранительница честивости"
+        
+        # Рендер текста
+        surf_name = self.font_boss_name.render(name_text, True, (255, 240, 200))
+        surf_title = self.font_boss_title.render(title_text, True, (200, 200, 200))
+        
+        # Позиционирование (Слева от портрета)
+        # Имя
+        name_rect = surf_name.get_rect(topright=(p_x - 15, p_y + 5))
+        # Тень для имени
+        surf_name_shadow = self.font_boss_name.render(name_text, True, (0, 0, 0))
+        self.screen.blit(surf_name_shadow, (name_rect.x + 2, name_rect.y + 2))
+        self.screen.blit(surf_name, name_rect)
+        
+        # Титул
+        title_rect = surf_title.get_rect(topright=(p_x - 15, p_y + 38))
+        self.screen.blit(surf_title, title_rect)
+
+        # --- 3. ПОЛОСКА ЗДОРОВЬЯ (HP BAR) ---
+        bar_x = p_x - 15 - bar_width
+        bar_y = p_y + 60
+        
+        # Вычисление процента
+        hp_pct = max(0, self.boss.hp / self.boss.max_hp)
+        current_bar_w = int(bar_width * hp_pct)
+        
+        # Фон полоски (ромбовидные края)
+        bg_poly = [
+            (bar_x - 10, bar_y + bar_height), (bar_x, bar_y), # Скос слева
+            (p_x - 5, bar_y), (p_x - 15, bar_y + bar_height)  # Соединение с портретом
+        ]
+        pygame.draw.polygon(self.screen, C_HP_BG, bg_poly)
+        
+        # Заливка HP
+        if current_bar_w > 0:
+            fill_poly = [
+                (bar_x - 10, bar_y + bar_height), (bar_x, bar_y),
+                (bar_x + current_bar_w, bar_y), (bar_x + current_bar_w - 10, bar_y + bar_height)
+            ]
+            # Если полоска полная, корректируем правый край
+            if hp_pct > 0.98:
+                 fill_poly[2] = (p_x - 5, bar_y)
+                 fill_poly[3] = (p_x - 15, bar_y + bar_height)
+            
+            pygame.draw.polygon(self.screen, C_HP_FILL, fill_poly)
+            # Тонкая линия свечения сверху
+            pygame.draw.line(self.screen, C_HP_GLOW, fill_poly[1], fill_poly[2], 2)
+
+        # Окантовка полоски
+        pygame.draw.polygon(self.screen, C_GOLD, bg_poly, 2)
 
     def draw_grid(self, offset):
         start_x = int(-offset.x) % TILE_SIZE
@@ -142,9 +271,12 @@ class Game:
             
             self.check_collisions()
             
-            self.screen.fill(COLOR_BG)
+            
             shake_offset = self.screen_shake.get_offset()
             self.draw_grid(shake_offset)
+            bg_x = -20 + shake_offset.x
+            bg_y = -20 + shake_offset.y
+            self.screen.blit(self.cave_bg, (bg_x, bg_y))
             
             for sprite in all_sprites:
                 # Отрисовка спрайта
@@ -187,7 +319,9 @@ class Game:
                 )
                 
                 # Отрисовка UI босса
-                self.boss.draw_boss_ui(self.screen, shake_offset)
+                self.draw_boss_hud()
+
+                
             
             # *** ОТЛАДКА: Отрисовка хитбокса игрока ***
             self.draw_hitbox(self.player, shake_offset)
