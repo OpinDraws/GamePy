@@ -14,6 +14,33 @@ from rendering.archangel_render import draw_archangel_boss
 DEBUG_HITBOX_COLOR_NORMAL = (0, 255, 0) # Зеленый
 DEBUG_HITBOX_COLOR_INVUL = (255, 0, 0)  # Красный
 
+# *** НОВАЯ ФУНКЦИЯ КОЛЛИЗИИ ***
+def complex_collision_check(sprite_a, sprite_b):
+    """
+    Проверяет коллизию с учетом hitboxes, если они есть.
+    Если hitboxes нет, использует collide_circle (или collide_rect по умолчанию в pygame).
+    Но здесь мы явно реализуем логику:
+    1. Если у A есть hitboxes -> проверяем их против B.rect
+    2. Если у B есть hitboxes -> проверяем их против A.rect
+    3. Иначе -> collide_circle (так как в игре используются круги для снарядов и игрока)
+    """
+    # Проверяем sprite_a (например, Босс)
+    if hasattr(sprite_a, 'hitboxes') and sprite_a.hitboxes:
+        for hb in sprite_a.hitboxes:
+            if hb.colliderect(sprite_b.rect):
+                return True
+        return False
+    
+    # Проверяем sprite_b
+    if hasattr(sprite_b, 'hitboxes') and sprite_b.hitboxes:
+        for hb in sprite_b.hitboxes:
+            if hb.colliderect(sprite_a.rect):
+                return True
+        return False
+        
+    # Фолбек на круги (радиус)
+    return pygame.sprite.collide_circle(sprite_a, sprite_b)
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -51,27 +78,36 @@ class Game:
         for y in range(start_y, HEIGHT, TILE_SIZE):
             pygame.draw.line(self.screen, COLOR_GRID, (0, y), (WIDTH, y))
 
-    # *** НОВАЯ ФУНКЦИЯ: Отрисовка хитбокса ***
+    # *** ОБНОВЛЕННАЯ ФУНКЦИЯ: Отрисовка хитбокса ***
     def draw_hitbox(self, target_sprite, offset):
-        if hasattr(target_sprite, 'get_hitbox_rect'):
-            # Получаем прямоугольник хитбокса в мировых координатах
-            hitbox_rect = target_sprite.get_hitbox_rect()
-            
-            # Применяем смещение экрана
+        # Если есть сложные хитбоксы, рисуем их все
+        if hasattr(target_sprite, 'hitboxes') and target_sprite.hitboxes:
+            for hb in target_sprite.hitboxes:
+                draw_rect = hb.move(offset.x, offset.y)
+                # Голубой цвет для частей тела
+                color = (0, 200, 255) 
+                if hasattr(target_sprite, 'invulnerable') and target_sprite.invulnerable:
+                    color = DEBUG_HITBOX_COLOR_INVUL
+                pygame.draw.rect(self.screen, color, draw_rect, 1)
+        else:
+            # Стандартная отрисовка
+            if hasattr(target_sprite, 'get_hitbox_rect'):
+                hitbox_rect = target_sprite.get_hitbox_rect()
+            else:
+                hitbox_rect = target_sprite.rect
+                
             draw_rect = hitbox_rect.move(offset.x, offset.y)
-            
-            # Определяем цвет (красный для неуязвимости, зеленый в норме)
             color = DEBUG_HITBOX_COLOR_NORMAL
             if hasattr(target_sprite, 'invulnerable') and target_sprite.invulnerable:
                 color = DEBUG_HITBOX_COLOR_INVUL
-                
             pygame.draw.rect(self.screen, color, draw_rect, 1)
 
     def spawn_enemies(self):
         pass
 
     def check_collisions(self):
-        hits = pygame.sprite.groupcollide(enemies, bullets, False, True, pygame.sprite.collide_circle)
+        # *** ИЗМЕНЕНИЕ: Используем complex_collision_check ***
+        hits = pygame.sprite.groupcollide(enemies, bullets, False, True, complex_collision_check)
         for enemy, bullet_list in hits.items():
             for bullet in bullet_list:
                 bullet.create_impact_vfx()
@@ -128,9 +164,10 @@ class Game:
                 shield_progress = self.boss.shield_animation_progress 
                 phase_two = self.boss.is_phase_two
                 
-                # Новые параметры
                 wing_spread = self.boss.wing_spread_factor
                 is_trans = self.boss.state == self.boss.STATE_PHASE_TRANSITION
+                pose_factor = self.boss.transition_pose_factor
+                tilt_x = self.boss.movement_tilt_x 
 
                 draw_archangel_boss(
                     self.screen, 
@@ -143,18 +180,20 @@ class Game:
                     smite_progress,
                     shield_progress,
                     phase_two,
-                    wing_spread, # factor
-                    is_trans     # is_transitioning
+                    wing_spread, 
+                    is_trans,    
+                    pose_factor,  
+                    tilt_x 
                 )
                 
                 # Отрисовка UI босса
                 self.boss.draw_boss_ui(self.screen, shake_offset)
             
-       
-          
-            
             # *** ОТЛАДКА: Отрисовка хитбокса игрока ***
             self.draw_hitbox(self.player, shake_offset)
+            # *** ОТЛАДКА: Отрисовка хитбокса босса ***
+            if self.boss.alive():
+                self.draw_hitbox(self.boss, shake_offset)
 
 
             self.player.skill_manager.draw(self.screen, shake_offset)
