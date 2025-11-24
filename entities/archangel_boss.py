@@ -6,7 +6,7 @@ import random
 from config import WIDTH, HEIGHT, all_sprites, enemies, FPS 
 from boss_weapons import AngelSpearProjectile 
 from rendering.archangel_render import draw_archangel_boss
-from vfx import GhostMistVFX, CelestialSmiteVFX, ShieldWaveVFX 
+from vfx import GhostMistVFX, CelestialSmiteVFX, ShieldWaveVFX, ChaosRiftVFX
 
 class ArchangelBoss(pygame.sprite.Sprite):
     # --- Состояния машины ---
@@ -16,20 +16,23 @@ class ArchangelBoss(pygame.sprite.Sprite):
     STATE_MIST_EFFECT = 3 
     STATE_PREPARE_SMITE = 4 
     STATE_SHIELD_ATTACK = 5
-    STATE_PHASE_TRANSITION = 6 # <--- НОВОЕ СОСТОЯНИЕ ПЕРЕХОДА
+    STATE_PHASE_TRANSITION = 6 
+    STATE_RECOVERY_PHASE_TWO = 7 
+    STATE_PHASE_TWO_DASH = 8 
+    STATE_CHAOS_BARRAGE = 9 
 
-    # --- Константы времени (в кадрах) ---
+    # --- БАЗОВЫЕ Константы времени (в кадрах) ---
     PREPARE_DURATION = 45 
     LAUNCH_DURATION = 45   
-    COOLDOWN_DURATION = 180 
+    COOLDOWN_DURATION = 60 
     
     TOTAL_VFX_AND_WAIT_FRAMES = 120 
-    MIST_EFFECT_DURATION = TOTAL_VFX_AND_WAIT_FRAMES - PREPARE_DURATION
     
     # --- КОНСТАНТЫ ДЛЯ ПЕРЕХОДА ---
-    PHASE_TRANSITION_DURATION = 120 # 2 секунды (при 60 FPS)
+    PHASE_TRANSITION_DURATION = 120 
+    PHASE_RECOVERY_DURATION = 30    
 
-    # --- КОНСТАНТЫ ДЛЯ SMITE ---
+    # --- БАЗОВЫЕ КОНСТАНТЫ ДЛЯ SMITE ---
     SMITE_PREPARE_DURATION = 60 
     SMITE_BLAST_DURATION = 15   
     SMITE_DAMAGE = 25           
@@ -37,14 +40,28 @@ class ArchangelBoss(pygame.sprite.Sprite):
     SMITE_SECOND_BLAST_DELAY = int(0.5 * FPS) 
     SMITE_FADE_OUT_DURATION = int(0.5 * FPS) 
 
-    # --- КОНСТАНТЫ ДЛЯ ЩИТА ---
+    # --- БАЗОВЫЕ КОНСТАНТЫ ДЛЯ ЩИТА ---
     SHIELD_ATTACK_RANGE = 250 
-    # ИЗМЕНЕНИЕ: Увеличено время атаки для более плавного возврата
-    SHIELD_ATTACK_DURATION = 45 # Было 30
-    SHIELD_COOLDOWN = 180 
+    SHIELD_ATTACK_DURATION = 45 
+    SHIELD_COOLDOWN = 120 
+
+    # --- КОНСТАНТЫ МОБИЛЬНОСТИ (ФАЗА 2) ---
+    DASH_COOLDOWN = 210 
+    DASH_DURATION = 18  
+    MOVEMENT_RADIUS = 400 
+    
+    # --- КОНСТАНТЫ ДЛЯ CHAOS BARRAGE ---
+    CHAOS_BARRAGE_DURATION = 600 # 10 секунд ульты
+    RIFT_SPAWN_INTERVAL = 72 
 
     # --- ОФФСЕТЫ ДЛЯ ВЕЕРНОЙ АТАКИ ---
     SPEAR_X_OFFSETS = [-500, -250, 250, 500] 
+    
+    SPEAR_WAVE2_OFFSETS = [
+        (-600, -100), (-400, 50), (-200, -100), 
+        (200, -100), (400, 50), (600, -100)
+    ]
+    
     FIXED_FLIGHT_TIME_MS = 500 
 
     def __init__(self, x, y, player):
@@ -55,7 +72,9 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.player = player
         self.pos = pygame.math.Vector2(x, y)
         self.rect = pygame.Rect(x - 40, y - 20, 80, 60)
-        self.radius = 40
+        self.radius = 40 
+
+        self.hitboxes = []
 
         self.fixed_target_pos = pygame.math.Vector2(0, 0)
         
@@ -65,7 +84,8 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.max_hp = 2000
         self.time_ticks = 0
         
-        self.target_pos = pygame.math.Vector2(WIDTH/2, HEIGHT/2)
+        self.arena_center = pygame.math.Vector2(WIDTH/2, HEIGHT/2)
+        self.target_pos = self.arena_center.copy()
         self.move_speed = 0.5 
         
         # --- МАШИНА СОСТОЯНИЙ И АНИМАЦИИ ---
@@ -78,154 +98,291 @@ class ArchangelBoss(pygame.sprite.Sprite):
         
         # --- ФАЗЫ БОССА ---
         self.is_phase_two = False 
-        self.wing_spread_factor = 0.0 # 0.0 - обычные, 1.0 - широко расправленные
+        self.wing_spread_factor = 0.0 
+        self.transition_pose_factor = 0.0 
+        
+        # *** НОВЫЕ ФЛАГИ ***
+        self.invulnerable = False       # Флаг неуязвимости
+        self.final_attack_triggered = False # Чтобы запустить ульту только один раз
+        
+        # --- МОБИЛЬНОСТЬ ---
+        self.dash_timer = self.DASH_COOLDOWN 
+        self.dash_start_pos = pygame.math.Vector2(0, 0) 
+        self.movement_tilt_x = 0.0 
         
         # --- НОВЫЕ ПЕРЕМЕННЫЕ ---
         self.phantom_spears = [] 
+        self.spear_wave_two_spawned = False 
         self.vfx_mist_active = False 
         self.attack_counter = 0 
         self.shake_func = player.shake_func 
         
         self.shield_cooldown_timer = 0 
+        self.rift_timer = 0 
+
+    def get_speed_factor(self):
+        if self.state == self.STATE_CHAOS_BARRAGE:
+            return 1.0
+        return 0.5 if self.is_phase_two else 1.0
 
     def update(self, dt):
         self.time_ticks += 1
         self.state_timer += 1
         
-        # --- ПРОВЕРКА ПЕРЕХОДА ВО ВТОРУЮ ФАЗУ ---
+        factor = self.get_speed_factor()
+        
+        # --- ЛОГИКА ПЕРЕХОДОВ ПО ХП ---
         health_pct = self.hp / self.max_hp
-        # Переход начинается, если HP < 99% (тест), мы не во 2 фазе и не в процессе перехода
-        if not self.is_phase_two and self.state != self.STATE_PHASE_TRANSITION and health_pct < 0.99:
-            self.enter_phase_two()
-
-        # Уменьшаем кулдаун щита
-        if self.shield_cooldown_timer > 0:
-            self.shield_cooldown_timer -= 1
         
-        # ЛОГИКА ПЕРЕМЕЩЕНИЯ
-        current_speed = self.move_speed * (1.5 if self.is_phase_two else 1.0) 
-        
-        # Во время перехода босс замедляется или останавливается для пафоса
-        if self.state == self.STATE_PHASE_TRANSITION:
-            current_speed *= 0.1 
+        # 1. Переход во ВТОРУЮ ФАЗУ (70% HP)
+        if not self.is_phase_two and self.state != self.STATE_PHASE_TRANSITION and self.state != self.STATE_RECOVERY_PHASE_TWO:
+            if health_pct < 0.70: # *** ИЗМЕНЕНИЕ: 70% ***
+                self.enter_phase_two()
 
-        direction = self.target_pos - self.pos
-        distance = direction.length()
-        if distance > 1:
-            self.pos += direction.normalize() * current_speed * dt * 60
-        self.rect.center = self.pos
+        # 2. ФИНАЛЬНАЯ АТАКА (< 250 HP)
+        # Запускаем только если уже во 2 фазе, не в переходе, и еще не запускали
+        if self.is_phase_two and not self.final_attack_triggered and self.state != self.STATE_PHASE_TRANSITION:
+            if self.hp < 250:
+                self.start_final_chaos_attack()
+
+        if self.is_phase_two:
+            self.wing_spread_factor = 1.0 
+
+        if self.shield_cooldown_timer > 0: self.shield_cooldown_timer -= 1
+        
+        # --- ЛОГИКА РЫВКОВ ---
+        if self.is_phase_two and self.state not in [self.STATE_PHASE_TRANSITION, self.STATE_RECOVERY_PHASE_TWO, self.STATE_PHASE_TWO_DASH, self.STATE_CHAOS_BARRAGE]:
+            self.dash_timer -= 1
+            if self.dash_timer <= 0:
+                if self.state == self.STATE_HOVER:
+                    self.start_phase_two_dash()
+
+        # --- ФИЗИКА ДВИЖЕНИЯ ---
+        if self.state == self.STATE_PHASE_TWO_DASH:
+            progress = min(1.0, self.state_timer / self.DASH_DURATION)
+            smooth_t = progress * progress * (3 - 2 * progress)
+            self.pos = self.dash_start_pos.lerp(self.target_pos, smooth_t)
+            move_vec = self.target_pos - self.dash_start_pos
+            if move_vec.length() > 0:
+                self.movement_tilt_x = (move_vec.normalize().x) * (1.0 - progress) 
+            if self.state_timer >= self.DASH_DURATION:
+                self.movement_tilt_x = 0.0 
+                self.dash_timer = self.DASH_COOLDOWN
+                self.set_state(self.STATE_HOVER)
+        
+        elif self.state == self.STATE_CHAOS_BARRAGE:
+            # Плавный дрейф к центру во время ульты
+            dir_to_center = self.arena_center - self.pos
+            if dir_to_center.length() > 5:
+                self.pos += dir_to_center.normalize() * 2.0 
+                
+        else:
+            target_speed = self.move_speed
+            if self.is_phase_two: target_speed *= 0.2 
+            if self.state == self.STATE_PHASE_TRANSITION:
+                target_speed *= 0.1 
+
+            direction = self.target_pos - self.pos
+            distance = direction.length()
+            if distance > 1:
+                self.pos += direction.normalize() * target_speed * dt * 60
+            
+            self.movement_tilt_x = self.movement_tilt_x * 0.9
+
+        # *** ОБНОВЛЕНИЕ ХИТБОКСОВ ***
+        hb_upper = pygame.Rect(0, 0, 50, 120)
+        hb_upper.center = (self.pos.x, self.pos.y - 90)
+        hb_lower = pygame.Rect(0, 0, 90, 90)
+        hb_lower.center = (self.pos.x, self.pos.y + 10)
+        self.hitboxes = [hb_upper, hb_lower]
+        self.rect = hb_upper.union(hb_lower)
         
         # --- ПРОВЕРКА НА БЛИЖНИЙ БОЙ (ЩИТ) ---
-        # Запрещаем атаки во время перехода
-        if self.state != self.STATE_PHASE_TRANSITION:
+        if self.state not in [self.STATE_PHASE_TRANSITION, self.STATE_RECOVERY_PHASE_TWO, self.STATE_PHASE_TWO_DASH, self.STATE_CHAOS_BARRAGE]:
             dist_to_player = (self.player.pos - self.pos).length()
-            
             can_shield_bash = (
                 dist_to_player < self.SHIELD_ATTACK_RANGE and
                 self.shield_cooldown_timer <= 0 and
                 self.state not in [self.STATE_PREPARE_SPEAR, self.STATE_LAUNCH_SPEAR, self.STATE_MIST_EFFECT]
             )
-
             if can_shield_bash:
                 if self.state == self.STATE_HOVER:
                     self.set_state(self.STATE_SHIELD_ATTACK)
         
-        
         # --- ОБНОВЛЕНИЕ МАШИНЫ СОСТОЯНИЙ ---
         if self.state == self.STATE_HOVER:
             self.cooldown_timer -= 1
-            self.spear_animation_progress = max(0.0, self.spear_animation_progress - 0.02) 
+            anim_recovery_speed = 0.02 if not self.is_phase_two else 0.04
+            
+            self.spear_animation_progress = max(0.0, self.spear_animation_progress - anim_recovery_speed) 
             self.smite_vfx_progress = 0.0 
-            self.shield_animation_progress = max(0.0, self.shield_animation_progress - 0.1) 
+            self.shield_animation_progress = max(0.0, self.shield_animation_progress - 0.1)
+            self.transition_pose_factor = 0.0 
 
             if self.cooldown_timer <= 0:
                 if self.attack_counter % 2 == 0:
                     self.set_state(self.STATE_PREPARE_SPEAR)
-                    self.start_mist_effect() 
-                    self.spawn_visual_spears() 
+                    self.start_mist_effect(factor)
+                    self.spawn_visual_spears(factor)
                 else:
                     self.set_state(self.STATE_PREPARE_SMITE)
-                    self.start_smite_attack() 
-                    
+                    self.start_smite_attack(factor) 
                 self.attack_counter += 1
 
-        # ... (Остальные состояния без изменений) ...
         elif self.state == self.STATE_PREPARE_SPEAR:
-            progress = self.state_timer / self.PREPARE_DURATION
+            dur = int(self.PREPARE_DURATION * factor)
+            progress = self.state_timer / dur
             self.spear_animation_progress = min(1.0, progress)
             self.smite_vfx_progress = 0.0 
-            if self.state_timer >= self.PREPARE_DURATION:
+            
+            wave2_delay_frames = int(0.15 * 60 * factor) 
+            if self.is_phase_two and not self.spear_wave_two_spawned:
+                if self.state_timer >= wave2_delay_frames:
+                    total_vfx_dur = int(self.TOTAL_VFX_AND_WAIT_FRAMES * factor)
+                    remaining_frames_for_sync = total_vfx_dur - self.state_timer
+                    remaining_ms = remaining_frames_for_sync * 1000 / 60
+                    extra_delay_ms = 200 
+                    self.spawn_visual_spears_wave2(factor, remaining_ms + extra_delay_ms)
+                    self.spear_wave_two_spawned = True
+
+            if self.state_timer >= dur:
                 self.set_state(self.STATE_MIST_EFFECT)
                 
         elif self.state == self.STATE_MIST_EFFECT:
             self.spear_animation_progress = 1.0 
             self.smite_vfx_progress = 0.0 
-            if self.state_timer >= self.MIST_EFFECT_DURATION:
+            total_dur = int(self.TOTAL_VFX_AND_WAIT_FRAMES * factor)
+            prep_dur = int(self.PREPARE_DURATION * factor)
+            mist_dur = total_dur - prep_dur
+            if self.state_timer >= mist_dur:
                 self.activate_spears_flight() 
                 self.set_state(self.STATE_LAUNCH_SPEAR)
 
         elif self.state == self.STATE_LAUNCH_SPEAR:
-            progress = self.state_timer / self.LAUNCH_DURATION
+            dur = int(self.LAUNCH_DURATION * factor)
+            progress = self.state_timer / dur
             self.spear_animation_progress = max(0.0, 1.0 - progress) 
             self.smite_vfx_progress = 0.0 
-            if self.state_timer >= self.LAUNCH_DURATION:
-                base_cd = self.COOLDOWN_DURATION
-                actual_cd = base_cd * 0.7 if self.is_phase_two else base_cd
-                self.cooldown_timer = actual_cd
+            if self.state_timer >= dur:
+                self.cooldown_timer = int(self.COOLDOWN_DURATION * factor)
                 self.set_state(self.STATE_HOVER)
 
         elif self.state == self.STATE_PREPARE_SMITE:
             self.spear_animation_progress = 0.0 
-            total_smite_time = (
+            total_smite_time = int((
                 self.SMITE_SECOND_BLAST_DELAY + 
                 self.SMITE_PREPARE_DURATION + 
                 self.SMITE_BLAST_DURATION +
                 self.SMITE_FADE_OUT_DURATION 
-            )
-            self.smite_vfx_progress = min(1.0, self.state_timer / total_smite_time) 
-            if self.state_timer >= total_smite_time:
-                base_cd = self.COOLDOWN_DURATION
-                actual_cd = base_cd * 0.7 if self.is_phase_two else base_cd
-                self.cooldown_timer = actual_cd
+            ) * factor)
+            extra_delay = 0
+            if self.is_phase_two:
+                extra_delay = int(self.SMITE_SECOND_BLAST_DELAY * 2 * factor) 
+            full_state_duration = total_smite_time + extra_delay
+            self.smite_vfx_progress = min(1.0, self.state_timer / full_state_duration) 
+            if self.state_timer >= full_state_duration:
+                self.cooldown_timer = int(self.COOLDOWN_DURATION * factor)
                 self.set_state(self.STATE_HOVER)
 
         elif self.state == self.STATE_SHIELD_ATTACK:
             self.spear_animation_progress = 0.0
             self.smite_vfx_progress = 0.0 
-            strike_time = self.SHIELD_ATTACK_DURATION * 0.3 # Удар быстрее, возврат дольше
-            
+            total_dur = int(self.SHIELD_ATTACK_DURATION * factor)
+            strike_time = total_dur * 0.3 
             if self.state_timer <= strike_time:
                 self.shield_animation_progress = self.state_timer / strike_time
                 if self.state_timer == int(strike_time): 
                      self.spawn_shield_wave()
             else:
-                return_progress = (self.state_timer - strike_time) / (self.SHIELD_ATTACK_DURATION - strike_time)
+                return_progress = (self.state_timer - strike_time) / (total_dur - strike_time)
                 self.shield_animation_progress = 1.0 - return_progress
-            if self.state_timer >= self.SHIELD_ATTACK_DURATION:
-                self.shield_cooldown_timer = self.SHIELD_COOLDOWN 
+            if self.state_timer >= total_dur:
+                cd_factor = 0.25 if self.is_phase_two else 1.0
+                self.shield_cooldown_timer = int(self.SHIELD_COOLDOWN * cd_factor)
                 self.set_state(self.STATE_HOVER)
 
-        # --- НОВОЕ СОСТОЯНИЕ: ПЕРЕХОД В ФАЗУ 2 ---
         elif self.state == self.STATE_PHASE_TRANSITION:
-            # Плавное увеличение wing_spread_factor от 0 до 1
-            self.wing_spread_factor = min(1.0, self.state_timer / self.PHASE_TRANSITION_DURATION)
-            
-            # Каждые 20 кадров небольшая тряска (нарастание напряжения)
+            progress = min(1.0, self.state_timer / self.PHASE_TRANSITION_DURATION)
+            self.wing_spread_factor = progress
+            self.transition_pose_factor = progress 
             if self.state_timer % 20 == 0:
                 self.shake_func(2 + self.wing_spread_factor * 5)
-
             if self.state_timer >= self.PHASE_TRANSITION_DURATION:
-                # Завершение перехода
                 self.is_phase_two = True
-                self.wing_spread_factor = 1.0 # Фиксируем крылья в широком положении
-                self.shake_func(20) # Финальный взрыв энергии
+                self.wing_spread_factor = 1.0
+                self.transition_pose_factor = 1.0
+                self.shake_func(20) 
+                self.set_state(self.STATE_RECOVERY_PHASE_TWO)
+
+        elif self.state == self.STATE_RECOVERY_PHASE_TWO:
+            self.wing_spread_factor = 1.0
+            progress = self.state_timer / self.PHASE_RECOVERY_DURATION
+            self.transition_pose_factor = max(0.0, 1.0 - progress)
+            if self.state_timer >= self.PHASE_RECOVERY_DURATION:
+                self.transition_pose_factor = 0.0
+                # *** ИЗМЕНЕНИЕ: Возвращаемся в HOVER, а не в ульту ***
+                # Ульта теперь запускается по условию ХП
                 self.set_state(self.STATE_HOVER)
 
+        # --- СОСТОЯНИЕ ФИНАЛЬНОЙ АТАКИ (CHAOS BARRAGE) ---
+        elif self.state == self.STATE_CHAOS_BARRAGE:
+            # Поза
+            self.transition_pose_factor = 1.0 
+            self.smite_vfx_progress = 0.5     
+            
+            # Эффекты
+            self.shake_func(5)
+            
+            self.rift_timer += 1
+            if self.rift_timer >= self.RIFT_SPAWN_INTERVAL:
+                self.rift_timer = 0
+                self.spawn_chaos_rifts()
+            
+            # Конец ульты = Смерть
+            if self.state_timer >= self.CHAOS_BARRAGE_DURATION:
+                self.kill() # Босс умирает
+
+    def start_final_chaos_attack(self):
+        """Запускает финальную, смертельную атаку."""
+        self.set_state(self.STATE_CHAOS_BARRAGE)
+        self.final_attack_triggered = True
+        self.invulnerable = True # Становится неуязвимым
+        # Сброс других анимаций
+        self.spear_animation_progress = 0.0
+        self.shield_animation_progress = 0.0
+        print("!!! FINAL CHAOS ATTACK STARTED !!!")
+
+    # ... (Остальные методы spawn_chaos_rifts, start_phase_two_dash и т.д. без изменений) ...
+    def spawn_chaos_rifts(self):
+        count = random.randint(3, 5)
+        for _ in range(count):
+            for _ in range(10):
+                x = random.randint(50, WIDTH-50)
+                y = random.randint(50, HEIGHT-50)
+                pos = pygame.math.Vector2(x, y)
+                if abs(pos.x - self.pos.x) > 200 and abs(pos.y - self.pos.y) > 200:
+                    ChaosRiftVFX(pos, self.RIFT_SPAWN_INTERVAL, self.player)
+                    break
+
+    def start_phase_two_dash(self):
+        self.set_state(self.STATE_PHASE_TWO_DASH)
+        self.dash_start_pos = self.pos.copy()
+        target_x, target_y = self.pos.x, self.pos.y
+        for _ in range(15):
+            angle = random.uniform(0, math.pi * 2)
+            dist = random.uniform(300, self.MOVEMENT_RADIUS) 
+            offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
+            candidate_x = max(100, min(WIDTH - 100, self.arena_center.x + offset.x))
+            candidate_y = max(100, min(HEIGHT - 100, self.arena_center.y + offset.y))
+            if abs(candidate_x - self.pos.x) >= 260 and abs(candidate_y - self.pos.y) >= 260:
+                target_x, target_y = candidate_x, candidate_y
+                break
+            target_x, target_y = candidate_x, candidate_y
+        self.target_pos = pygame.math.Vector2(target_x, target_y)
+        self.shake_func(5)
 
     def enter_phase_two(self):
-        """Запускает состояние перехода."""
         self.set_state(self.STATE_PHASE_TRANSITION)
-        # Сбрасываем анимации
         self.spear_animation_progress = 0.0
         self.smite_vfx_progress = 0.0
         self.shield_animation_progress = 0.0
@@ -234,63 +391,76 @@ class ArchangelBoss(pygame.sprite.Sprite):
     def set_state(self, new_state):
         self.state = new_state
         self.state_timer = 0
+        if new_state == self.STATE_PREPARE_SPEAR:
+            self.spear_wave_two_spawned = False
     
     def spawn_shield_wave(self):
         wave_pos = self.pos + pygame.math.Vector2(10, -20)
-        ShieldWaveVFX(wave_pos, max_radius=360, damage=30, push_force=25, duration=30)
+        radius = 300 if self.is_phase_two else 190
+        ShieldWaveVFX(wave_pos, max_radius=radius, damage=30, push_force=25, duration=30)
         self.shake_func(10) 
 
-    def start_mist_effect(self):
+    def start_mist_effect(self, factor=1.0):
         self.fixed_target_pos = self.player.pos.copy() 
         self.vfx_mist_active = True 
 
-    def start_smite_attack(self):
+    def start_smite_attack(self, factor=1.0):
         fixed_pos = self.player.pos.copy() 
-        CelestialSmiteVFX(
-            fixed_pos, 
-            self.SMITE_PREPARE_DURATION,
-            self.SMITE_BLAST_DURATION,
-            self.SMITE_DAMAGE,
-            self.player,
-            self.shake_func,
-            prep_delay_frames=0 
-        )
+        prep = int(self.SMITE_PREPARE_DURATION * factor)
+        blast = int(self.SMITE_BLAST_DURATION * factor)
+        delay = int(self.SMITE_SECOND_BLAST_DELAY * factor)
+        CelestialSmiteVFX(fixed_pos, prep, blast, self.SMITE_DAMAGE, self.player, self.shake_func, prep_delay_frames=0, size_mult=1.0, color_mode='cyan')
         pos_getter_func = lambda: self.player.pos.copy() 
-        CelestialSmiteVFX(
-            pos_getter_func, 
-            self.SMITE_PREPARE_DURATION,
-            self.SMITE_BLAST_DURATION,
-            self.SMITE_DAMAGE,
-            self.player,
-            self.shake_func,
-            prep_delay_frames=self.SMITE_SECOND_BLAST_DELAY 
-        )
+        CelestialSmiteVFX(pos_getter_func, prep, blast, self.SMITE_DAMAGE, self.player, self.shake_func, prep_delay_frames=delay, size_mult=1.0, color_mode='cyan')
+        if self.is_phase_two:
+            CelestialSmiteVFX(pos_getter_func, prep, blast, self.SMITE_DAMAGE, self.player, self.shake_func, prep_delay_frames=delay * 2, size_mult=1.1, color_mode='cyan_to_red')
+            CelestialSmiteVFX(pos_getter_func, prep, blast, self.SMITE_DAMAGE, self.player, self.shake_func, prep_delay_frames=delay * 3, size_mult=1.1, color_mode='cyan_to_red')
 
-    def spawn_visual_spears(self):
+    def spawn_visual_spears(self, factor=1.0):
         P_target = self.fixed_target_pos 
         relative_y_offset = -50 
         self.phantom_spears = []
-        total_vfx_ms = self.TOTAL_VFX_AND_WAIT_FRAMES * 1000 / 60 
-        for x_offset in self.SPEAR_X_OFFSETS:
-            P_start = pygame.math.Vector2(self.pos.x + x_offset, self.pos.y + relative_y_offset)
+        total_vfx_ms = (int(self.TOTAL_VFX_AND_WAIT_FRAMES * factor) * 1000) / 60 
+        self._create_spears_from_offsets(self.SPEAR_X_OFFSETS, P_target, relative_y_offset, total_vfx_ms)
+
+    def spawn_visual_spears_wave2(self, factor=1.0, remaining_ms=0):
+        P_target = self.fixed_target_pos 
+        relative_y_offset = -50 
+        if remaining_ms < 0: remaining_ms = 0
+        for offset in self.SPEAR_WAVE2_OFFSETS:
+            off_x, off_y = offset
+            P_start = pygame.math.Vector2(self.pos.x + off_x, self.pos.y + off_y)
             V_to_target = P_target - P_start
             if V_to_target.length_squared() == 0:
                  direction_for_angle = pygame.math.Vector2(1, 0)
             else:
                  direction_for_angle = V_to_target.normalize()
-            spear = AngelSpearProjectile(
-                P_start, direction_for_angle, P_target, self.FIXED_FLIGHT_TIME_MS, total_vfx_ms, all_sprites          
-            )
+            spear = AngelSpearProjectile(P_start, direction_for_angle, P_target, self.FIXED_FLIGHT_TIME_MS, remaining_ms, all_sprites)
+            self.phantom_spears.append(spear)
+
+    def _create_spears_from_offsets(self, x_offsets, P_target, y_offset, total_ms):
+        for x_offset in x_offsets:
+            P_start = pygame.math.Vector2(self.pos.x + x_offset, self.pos.y + y_offset)
+            V_to_target = P_target - P_start
+            if V_to_target.length_squared() == 0:
+                 direction_for_angle = pygame.math.Vector2(1, 0)
+            else:
+                 direction_for_angle = V_to_target.normalize()
+            spear = AngelSpearProjectile(P_start, direction_for_angle, P_target, self.FIXED_FLIGHT_TIME_MS, total_ms, all_sprites)
             self.phantom_spears.append(spear)
 
     def activate_spears_flight(self):
         for spear in self.phantom_spears:
-            spear.activate_flight()
+            pass 
         self.phantom_spears = [] 
         self.vfx_mist_active = False 
         self.fixed_target_pos = pygame.math.Vector2(0, 0)
             
     def take_damage(self, amount):
+        # *** ИЗМЕНЕНИЕ: Проверка неуязвимости ***
+        if self.invulnerable:
+            return # Урон не проходит
+            
         self.hp -= amount
         if self.hp <= 0:
             self.kill()
@@ -301,8 +471,11 @@ class ArchangelBoss(pygame.sprite.Sprite):
         bar_y = self.pos.y - 180 + offset.y
         pygame.draw.rect(surface, (30, 30, 0), (bar_x, bar_y, bar_w, bar_h))
         pct = max(0, self.hp / self.max_hp)
-        
         hp_color = (200, 150, 0) if not self.is_phase_two else (220, 50, 0)
         
+        # Если неуязвим, полоска серая или особая
+        if self.invulnerable:
+            hp_color = (100, 100, 100)
+            
         pygame.draw.rect(surface, hp_color, (bar_x, bar_y, bar_w * pct, bar_h))
         pygame.draw.rect(surface, (255, 215, 50), (bar_x, bar_y, bar_w * pct, bar_h/2))
