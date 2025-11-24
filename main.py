@@ -115,6 +115,17 @@ class Game:
             print("Ошибка: файл boss_icon.jpg не найден.")
             self.boss_portrait = pygame.Surface((80, 80))
             self.boss_portrait.fill((50, 0, 50))
+
+        try:
+            # Замените 'boss_theme.mp3' на имя вашего файла
+            pygame.mixer.music.load('boss_theme.mp3')
+            pygame.mixer.music.set_volume(0.5) # Громкость от 0.0 до 1.0
+            print("Музыка загружена.")
+        except Exception as e:
+            print(f"Не удалось загрузить музыку: {e}")
+        # ---------------------------
+
+        self.screen_shake = ScreenShake()
         self.screen_shake = ScreenShake()
         all_sprites.empty()
         bullets.empty()
@@ -156,6 +167,10 @@ class Game:
                 self.auto_spawn_timer -= 1
                 if self.auto_spawn_timer == 0:
                     self.boss.spawn_boss()
+                    # >> ДОБАВИТЬ ЗАПУСК МУЗЫКИ ЗДЕСЬ <<
+                    # loops=-1 (бесконечный повтор), fade_ms=4000 (4 сек плавного входа)
+                    if not pygame.mixer.music.get_busy():
+                        pygame.mixer.music.play(loops=-1, fade_ms=4000)
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()

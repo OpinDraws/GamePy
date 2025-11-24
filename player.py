@@ -38,7 +38,7 @@ class Player(pygame.sprite.Sprite):
         self.shake_func = shake_func
         
         # --- ЗДОРОВЬЕ И НЕУЯЗВИМОСТЬ (ОБНОВЛЕНО) ---
-        self.max_hp = 100
+        self.max_hp = 10000
         self.hp = self.max_hp
         self.invulnerable = False
         self.invul_timer = 0

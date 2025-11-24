@@ -15,7 +15,7 @@ class SlashProjectile(pygame.sprite.Sprite):
         # --- ПАРАМЕТРЫ АТАКИ ---
         self.max_distance = 500
         self.distance_traveled = 0
-        self.damage = 12 
+        self.damage = 30 
         
         self.is_fading = False
         self.fade_duration = 150 
