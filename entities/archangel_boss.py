@@ -375,12 +375,25 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.update_state_logic(factor)
 
     def update_hitboxes(self):
+        # Верхний хитбокс (тело/крылья) - Оставляем Rect
         hb_upper = pygame.Rect(0, 0, 50, 120)
         hb_upper.center = (self.pos.x, self.pos.y - 90)
-        hb_lower = pygame.Rect(0, 0, 90, 90)
-        hb_lower.center = (self.pos.x, self.pos.y + 10)
+        
+        # Нижний хитбокс (подол платья) - ТЕПЕРЬ КРУГ
+        # Это сделает углы "мягкими", и снаряды будут пролетать мимо краев платья
+        hb_lower = {
+            'type': 'circle', 
+            'center': (self.pos.x, self.pos.y + 10), 
+            'radius': 46 # Радиус 45 соответствует ширине 90
+        }
+        
         self.hitboxes = [hb_upper, hb_lower]
-        self.rect = hb_upper.union(hb_lower)
+        
+        # Обновляем self.rect для совместимости (берем описанный квадрат вокруг круга)
+        # Это нужно для некоторых проверок, которые ожидают rect
+        lower_rect_bounds = pygame.Rect(0, 0, 90, 90)
+        lower_rect_bounds.center = (self.pos.x, self.pos.y + 10)
+        self.rect = hb_upper.union(lower_rect_bounds)
 
     def update_state_logic(self, factor):
         if self.state == self.STATE_HOVER:
