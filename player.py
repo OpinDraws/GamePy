@@ -3,7 +3,7 @@ import math
 import random 
 from config import *
 from vfx import Particle
-from weapons import Bullet
+from weapons import SlashProjectile 
 import rendering
 from skills import SkillManager
 
@@ -14,13 +14,10 @@ class Player(pygame.sprite.Sprite):
         self.pos = pygame.math.Vector2(pos)
         self.vel = pygame.math.Vector2(0, 0)
         
-        # --- ХИТБОКС (Прямоугольный) ---
-        # *** ИЗМЕНЕНИЕ: Увеличение ширины и корректировка смещения ***
-        self.hitbox_width = 24  # Чуть шире, было 20
+        # --- ХИТБОКС ---
+        self.hitbox_width = 24 
         self.hitbox_height = 90
-        self.hitbox_offset_y = -38 # Сдвинуто вниз (было -45), чтобы захватить ступни и исключить макушку
-        
-        # NOTE: self.radius больше не используется для коллизии, но оставим для совместимости
+        self.hitbox_offset_y = -38 
         self.radius = self.hitbox_height // 2
         
         self.surface_size = 260 
@@ -40,17 +37,21 @@ class Player(pygame.sprite.Sprite):
         self.particle_groups = particle_groups
         self.shake_func = shake_func
         
-        # --- СИСТЕМА ЗДОРОВЬЯ ---
+        # --- ЗДОРОВЬЕ И НЕУЯЗВИМОСТЬ (ОБНОВЛЕНО) ---
         self.max_hp = 100
         self.hp = self.max_hp
         self.invulnerable = False
         self.invul_timer = 0
-        self.invul_duration = 1000 # 1 секунда неуязвимости после получения урона
         
-        # --- СТРЕЛЬБА ---
+        # ОЧЕНЬ КОРОТКАЯ НЕУЯЗВИМОСТЬ (0.2 сек)
+        self.invul_duration = 200 
+        
+        # --- СТРЕЛЬБА (ОБНОВЛЕНО) ---
         self.can_shoot = True
         self.shoot_timer = 0
-        self.shoot_cooldown = 180 
+        
+        # МЕДЛЕННАЯ АТАКА (350 мс вместо 90 мс)
+        self.shoot_cooldown = 200 
         
         self.bullet_group_ref = None
         self.all_sprites_ref = None
@@ -58,7 +59,7 @@ class Player(pygame.sprite.Sprite):
         # --- DASH ---
         self.can_dash = True
         self.dash_timer = 0
-        self.dash_cooldown = 2000
+        self.dash_cooldown = 1600
         self.is_dashing = False
         self.dash_duration = 200
         self.dash_start_time = 0
@@ -71,7 +72,6 @@ class Player(pygame.sprite.Sprite):
         self.walk_cycle = 0
         
     def get_hitbox_rect(self):
-        """Возвращает прямоугольник хитбокса, центрированный относительно self.pos."""
         return pygame.Rect(
             self.pos.x - self.hitbox_width // 2,
             self.pos.y + self.hitbox_offset_y - self.hitbox_height // 2,
@@ -88,29 +88,22 @@ class Player(pygame.sprite.Sprite):
         return deg
 
     def take_damage(self, amount):
-        """Метод получения урона."""
         current_time = pygame.time.get_ticks()
         if not self.invulnerable and not self.is_dashing:
             self.hp -= amount
             self.invulnerable = True
             self.invul_timer = current_time
-            self.shake_func(20) # Сильная тряска при получении урона
-            
-            # Визуальный эффект получения урона
+            self.shake_func(20)
             for _ in range(15):
                 Particle(self.pos, self.particle_groups, color=(255, 0, 0), speed=5, decay=15)
-                
             if self.hp <= 0:
                 self.die()
 
     def die(self):
-        """Логика смерти игрока."""
         print("Player Died!")
-        self.kill() # Удаляем спрайт игрока
-        # Тут можно добавить логику перезапуска игры
+        self.kill()
 
     def update_invulnerability(self):
-        """Обновление состояния неуязвимости."""
         if self.invulnerable:
             current_time = pygame.time.get_ticks()
             if current_time - self.invul_timer >= self.invul_duration:
@@ -151,12 +144,11 @@ class Player(pygame.sprite.Sprite):
             
         self.update_cape_physics()
         
-        # Добавляем мигание при неуязвимости
         alpha_mult = 1.0
         if self.invulnerable:
-            flash = (pygame.time.get_ticks() // 50) % 2 == 0
-            if flash:
-                alpha_mult = 0.5 
+            # Быстрое мигание (каждые 2 тика) из-за короткого инвула
+            flash = (pygame.time.get_ticks() // 30) % 2 == 0
+            if flash: alpha_mult = 0.5 
                 
         rendering.draw_vampire_advanced(
             self.image,
@@ -179,7 +171,12 @@ class Player(pygame.sprite.Sprite):
             if keys[pygame.K_a]: direction.x = -1
             if keys[pygame.K_d]: direction.x = 1
             if direction.length() > 0: direction = direction.normalize()
+            
             self.vel += direction * self.acc
+            
+            # Замедление при атаке (на 20%)
+            if not self.can_shoot:
+                self.vel *= 0.8 
             
             if keys[pygame.K_SPACE] and self.can_dash: 
                 self.dash(direction)
@@ -200,7 +197,6 @@ class Player(pygame.sprite.Sprite):
         self.vel = self.dash_vector 
         
         self.shake_func(8)
-        
         for _ in range(20):
             Particle(self.pos, self.particle_groups, color=(20, 20, 30), speed=2, decay=5)
 
@@ -210,7 +206,6 @@ class Player(pygame.sprite.Sprite):
         mouse_pos = pygame.mouse.get_pos()
         direction = (mouse_pos - self.pos).normalize()
         
-        # Спавн снаряда (позиция)
         base_pos = self.pos
         shoulder_offset = pygame.math.Vector2(0, -50)
         hand_reach = 35
@@ -223,10 +218,9 @@ class Player(pygame.sprite.Sprite):
         elif len(self.groups()) > 0:
              target_groups.append(self.groups()[0])
 
-        Bullet(spawn_pos, direction, target_groups, self.particle_groups)
+        SlashProjectile(spawn_pos, direction, target_groups, self.particle_groups)
         
-        # Отдача 
-        self.pos -= direction * 1
+        self.pos -= direction * 2
 
     def physics(self, dt):
         current_time = pygame.time.get_ticks()
@@ -245,7 +239,6 @@ class Player(pygame.sprite.Sprite):
                 self.vel.scale_to_length(self.max_speed)
 
         self.pos += self.vel * dt * 60
-        # Обновление self.rect, чтобы он соответствовал позиции для стандартной отрисовки
         self.rect.center = self.pos
 
     def update_custom(self, dt, enemies_group, bullet_group, all_sprites_group):
@@ -253,7 +246,7 @@ class Player(pygame.sprite.Sprite):
         self.all_sprites_ref = all_sprites_group
         
         self.input()
-        self.update_invulnerability() # *** НОВОЕ: Обновление неуязвимости ***
+        self.update_invulnerability() 
         self.angle = self.get_mouse_angle()
         self.skill_manager.update(dt, enemies_group)
         self.animate_visuals()

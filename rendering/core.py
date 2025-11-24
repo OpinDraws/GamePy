@@ -66,26 +66,61 @@ def draw_bone_segment(surface, start, end, color, width_start, width_end):
     pygame.draw.circle(surface, color, (int(end.x), int(end.y)), width_end // 2)
 
 def draw_alpha_polygon(surface, color, points):
-    """Рисует полигон с поддержкой альфа-канала (прозрачности)."""
+    """
+    Рисует полигон с поддержкой альфа-канала.
+    color: может быть (R, G, B) или (R, G, B, A).
+    """
     if len(points) < 3: return
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     min_x, max_x = min(xs), max(xs)
     min_y, max_y = min(ys), max(ys)
     w, h = int(max_x - min_x), int(max_y - min_y)
-    # Проверка на вырожденный полигон
     if w <= 0 or h <= 0: return
     
     shape_surf = pygame.Surface((w, h), pygame.SRCALPHA)
     local_points = [(p[0] - min_x, p[1] - min_y) for p in points]
-    pygame.draw.polygon(shape_surf, color, local_points)
+    
+    # Разделяем цвет и альфу
+    if len(color) == 4:
+        rgb = color[:3]
+        alpha = color[3]
+    else:
+        rgb = color
+        alpha = 255
+        
+    # Рисуем сплошным цветом на временной поверхности
+    pygame.draw.polygon(shape_surf, rgb, local_points)
+    
+    # Применяем альфу ко всей поверхности
+    # ПРИМЕЧАНИЕ: Для Surface с SRCALPHA set_alpha не работает как множитель для draw.
+    # Но fill с special_flags=BLEND_RGBA_MULT работает отлично для изменения альфы уже нарисованного.
+    if alpha < 255:
+        # Умножаем альфа-канал поверхности на нашу альфу
+        # (255, 255, 255, alpha) сохранит цвета, но изменит прозрачность
+        shape_surf.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+
     surface.blit(shape_surf, (min_x, min_y))
 
 def draw_alpha_circle(surface, color, center, radius):
     """Рисует круг с поддержкой альфа-канала."""
     radius = int(radius)
     if radius <= 0: return
-    target_rect = pygame.Rect(center[0]-radius, center[1]-radius, radius*2, radius*2)
+    
+    # Разделяем цвет
+    if len(color) == 4:
+        rgb = color[:3]
+        alpha = color[3]
+    else:
+        rgb = color
+        alpha = 255
+
+    target_rect = pygame.Rect(int(center[0]-radius), int(center[1]-radius), radius*2, radius*2)
     shape_surf = pygame.Surface(target_rect.size, pygame.SRCALPHA)
-    pygame.draw.circle(shape_surf, color, (radius, radius), radius)
+    
+    pygame.draw.circle(shape_surf, rgb, (radius, radius), radius)
+    
+    if alpha < 255:
+        shape_surf.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+        
     surface.blit(shape_surf, target_rect)

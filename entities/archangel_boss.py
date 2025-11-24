@@ -1,4 +1,4 @@
-# archangel_boss.py
+# entities/archangel_boss.py
 
 import pygame
 import math
@@ -10,6 +10,10 @@ from vfx import GhostMistVFX, CelestialSmiteVFX, ShieldWaveVFX, ChaosRiftVFX
 
 class ArchangelBoss(pygame.sprite.Sprite):
     # --- Состояния машины ---
+    STATE_HIDDEN = -1         # Босс скрыт (еще не заспавнен)
+    STATE_INTRO = -2          # Анимация появления из портала
+    STATE_DEATH = -3          # НОВОЕ: Состояние смерти
+    
     STATE_HOVER = 0
     STATE_PREPARE_SPEAR = 1
     STATE_LAUNCH_SPEAR = 2 
@@ -21,6 +25,17 @@ class ArchangelBoss(pygame.sprite.Sprite):
     STATE_PHASE_TWO_DASH = 8 
     STATE_CHAOS_BARRAGE = 9 
 
+    # --- ТАЙМИНГИ ИНТРО ---
+    INTRO_PORTAL_OPEN_TIME = 60
+    INTRO_DESCEND_TIME = 150
+    INTRO_PORTAL_CLOSE_TIME = 60
+
+   # Обновите тайминги смерти
+    DEATH_PHASE_1_DURATION = int(0.4 * FPS) # 24 кадра: Поза рук + исчезновение оружия
+    DEATH_PHASE_2_DURATION = int(0.4 * FPS) # 24 кадра: Крылья отлетают
+    DEATH_PHASE_3_DURATION = int(2.0 * FPS) # 120 кадров: Накопление света (НОВОЕ)
+    DEATH_PHASE_4_DURATION = int(0.5 * FPS) # 30 кадров: Вспышка и исчезновение (НОВОЕ)
+    
     # --- БАЗОВЫЕ Константы времени (в кадрах) ---
     PREPARE_DURATION = 45 
     LAUNCH_DURATION = 45   
@@ -47,8 +62,9 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     # --- КОНСТАНТЫ МОБИЛЬНОСТИ (ФАЗА 2) ---
     DASH_COOLDOWN = 210 
-    DASH_DURATION = 18  
-    MOVEMENT_RADIUS = 400 
+    DASH_DURATION = 18
+    # *** ИЗМЕНЕНИЕ 1: Увеличено с 400 до 560 (1.4x) для широких экранов ***
+    MOVEMENT_RADIUS = 560 
     
     # --- КОНСТАНТЫ ДЛЯ CHAOS BARRAGE ---
     CHAOS_BARRAGE_DURATION = 600 # 10 секунд ульты
@@ -66,19 +82,25 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def __init__(self, x, y, player):
         super().__init__()
-        self.groups = all_sprites, enemies
+        # НЕ добавляем в enemies сразу, чтобы не били, пока не появится
+        self.groups = all_sprites
         pygame.sprite.Sprite.__init__(self, self.groups)
         
         self.player = player
-        self.pos = pygame.math.Vector2(x, y)
+        self.spawn_pos = pygame.math.Vector2(x, y) 
+        
+        # СМЕЩЕНИЕ ПОРТАЛА: Портал рисуется на spawn_pos.y - 400
+        # Значит, босс должен вылетать из Y - 400
+        self.portal_offset_y = 400 
+        self.pos = pygame.math.Vector2(x, y - self.portal_offset_y) 
+        
         self.rect = pygame.Rect(x - 40, y - 20, 80, 60)
         self.radius = 40 
-
         self.hitboxes = []
 
         self.fixed_target_pos = pygame.math.Vector2(0, 0)
         
-        self.image = pygame.Surface((0, 0))
+        self.image = pygame.Surface((0, 0)) # Невидима
         
         self.hp = 2000
         self.max_hp = 2000
@@ -88,8 +110,10 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.target_pos = self.arena_center.copy()
         self.move_speed = 0.5 
         
-        # --- МАШИНА СОСТОЯНИЙ И АНИМАЦИИ ---
-        self.state = self.STATE_HOVER 
+        # Начинаем скрытым
+        self.state = self.STATE_HIDDEN 
+        self.is_active = False 
+        
         self.state_timer = 0
         self.cooldown_timer = self.COOLDOWN_DURATION
         self.spear_animation_progress = 0.0 
@@ -101,9 +125,8 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.wing_spread_factor = 0.0 
         self.transition_pose_factor = 0.0 
         
-        # *** НОВЫЕ ФЛАГИ ***
-        self.invulnerable = False       # Флаг неуязвимости
-        self.final_attack_triggered = False # Чтобы запустить ульту только один раз
+        self.invulnerable = True # Неуязвима по умолчанию (до спавна)
+        self.final_attack_triggered = False 
         
         # --- МОБИЛЬНОСТЬ ---
         self.dash_timer = self.DASH_COOLDOWN 
@@ -119,6 +142,31 @@ class ArchangelBoss(pygame.sprite.Sprite):
         
         self.shield_cooldown_timer = 0 
         self.rift_timer = 0 
+        
+        # Переменные для Интро
+        self.intro_portal_progress = 0.0
+        self.current_alpha = 0
+
+        # Параметры смерти для рендера
+        self.death_pose_factor = 0.0
+        self.death_item_alpha = 255
+        self.death_wing_alpha = 255
+        self.death_wing_offset = 0.0
+        
+        # НОВЫЕ ПЕРЕМЕННЫЕ
+        self.death_light_scale = 0.0 # 0.0 -> 1.0 (Сила света)
+        self.death_flash_alpha = 0   # 0 -> 255 (Яркость вспышки)
+
+    def spawn_boss(self):
+        """Вызвать босса (начать интро)."""
+        if self.state == self.STATE_HIDDEN:
+            print("BOSS SPAWN SEQUENCE INITIATED")
+            self.state = self.STATE_INTRO
+            self.state_timer = 0
+            self.is_active = True
+            # Ставим босса ВНУТРЬ портала (высоко)
+            self.pos = pygame.math.Vector2(self.spawn_pos.x, self.spawn_pos.y - self.portal_offset_y)
+            self.current_alpha = 0 # Скрыта
 
     def get_speed_factor(self):
         if self.state == self.STATE_CHAOS_BARRAGE:
@@ -127,25 +175,129 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def update(self, dt):
         self.time_ticks += 1
-        self.state_timer += 1
         
+        # 0. Если скрыт - ничего не делаем
+        if self.state == self.STATE_HIDDEN:
+            return
+        
+        # --- ЛОГИКА СМЕРТИ (ОБНОВЛЕННАЯ) ---
+        if self.state == self.STATE_DEATH:
+            self.state_timer += 1
+            self.invulnerable = True
+            
+            # Фаза 1: Руки в стороны и вверх, оружие исчезает (0.4 сек)
+            if self.state_timer <= self.DEATH_PHASE_1_DURATION:
+                progress = self.state_timer / self.DEATH_PHASE_1_DURATION
+                self.death_pose_factor = progress
+                self.death_item_alpha = int(255 * (1.0 - progress))
+                
+            # Фаза 2: Крылья отлетают (0.4 сек)
+            elif self.state_timer <= self.DEATH_PHASE_1_DURATION + self.DEATH_PHASE_2_DURATION:
+                self.death_pose_factor = 1.0
+                self.death_item_alpha = 0
+                
+                p2_timer = self.state_timer - self.DEATH_PHASE_1_DURATION
+                progress = p2_timer / self.DEATH_PHASE_2_DURATION
+                self.death_wing_alpha = int(255 * (1.0 - progress))
+                self.death_wing_offset = 30.0 * progress
+                
+            # Фаза 3: Накопление Света (2.0 сек)
+            elif self.state_timer <= self.DEATH_PHASE_1_DURATION + self.DEATH_PHASE_2_DURATION + self.DEATH_PHASE_3_DURATION:
+                self.death_wing_alpha = 0
+                self.death_wing_offset = 30.0
+                
+                p3_timer = self.state_timer - (self.DEATH_PHASE_1_DURATION + self.DEATH_PHASE_2_DURATION)
+                progress = p3_timer / self.DEATH_PHASE_3_DURATION
+                
+                self.death_light_scale = progress # Свет становится ярче и больше
+                self.shake_func(2 * progress) # Нарастающая тряска
+                
+            # Фаза 4: Вспышка и Исчезновение (0.5 сек)
+            elif self.state_timer <= self.DEATH_PHASE_1_DURATION + self.DEATH_PHASE_2_DURATION + self.DEATH_PHASE_3_DURATION + self.DEATH_PHASE_4_DURATION:
+                self.death_light_scale = 1.0
+                
+                p4_timer = self.state_timer - (self.DEATH_PHASE_1_DURATION + self.DEATH_PHASE_2_DURATION + self.DEATH_PHASE_3_DURATION)
+                progress = p4_timer / self.DEATH_PHASE_4_DURATION
+                
+                # Вспышка начинается с максимума и исчезает вместе с боссом
+                self.death_flash_alpha = 255 # Максимально белый
+                
+                # Босс (вместе со вспышкой) растворяется
+                self.current_alpha = int(255 * (1.0 - progress))
+                
+            else:
+                self.kill()
+            
+            return
+
+        # 1. ЛОГИКА ИНТРО (Появление)
+        if self.state == self.STATE_INTRO:
+            self.state_timer += 1
+            
+            # А. Открытие портала
+            if self.state_timer < self.INTRO_PORTAL_OPEN_TIME:
+                self.intro_portal_progress = self.state_timer / self.INTRO_PORTAL_OPEN_TIME
+                self.current_alpha = 0
+                self.shake_func(1)
+                
+            # Б. Спуск босса
+            elif self.state_timer < self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME:
+                self.intro_portal_progress = 1.0
+                descend_progress = (self.state_timer - self.INTRO_PORTAL_OPEN_TIME) / self.INTRO_DESCEND_TIME
+                
+                # Плавный спуск (Ease Out Cubic - быстро вылетает, плавно тормозит)
+                t = descend_progress
+                ease = 1 - pow(1 - t, 3)
+                
+                start_y = self.spawn_pos.y - self.portal_offset_y
+                end_y = self.spawn_pos.y
+                
+                self.pos.y = start_y + (end_y - start_y) * ease
+                
+                # Прозрачность: Проявляется быстрее, чем долетает
+                alpha_progress = min(1.0, descend_progress * 2.0)
+                self.current_alpha = int(255 * alpha_progress)
+                
+                self.shake_func(2)
+
+            # В. Закрытие портала
+            elif self.state_timer < self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME + self.INTRO_PORTAL_CLOSE_TIME:
+                self.current_alpha = 255
+                close_t = (self.state_timer - (self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME)) / self.INTRO_PORTAL_CLOSE_TIME
+                self.intro_portal_progress = 1.0 - close_t
+            
+            else:
+                # Конец интро - НАЧАЛО БОЯ
+                self.state = self.STATE_HOVER
+                self.intro_portal_progress = 0.0
+                self.invulnerable = False
+                self.cooldown_timer = 60
+                enemies.add(self) # Теперь можно бить
+                self.shake_func(10)
+            
+            self.update_hitboxes()
+            return # Выходим, чтобы не сработала боевая логика
+
+        # === ДАЛЕЕ: ОБЫЧНАЯ БОЕВАЯ ЛОГИКА ===
+        
+        self.state_timer += 1
         factor = self.get_speed_factor()
         
         # --- ЛОГИКА ПЕРЕХОДОВ ПО ХП ---
         health_pct = self.hp / self.max_hp
         
-        # 1. Переход во ВТОРУЮ ФАЗУ (70% HP)
+        # Переход во ВТОРУЮ ФАЗУ (70% HP)
         if not self.is_phase_two and self.state != self.STATE_PHASE_TRANSITION and self.state != self.STATE_RECOVERY_PHASE_TWO:
-            if health_pct < 0.70: # *** ИЗМЕНЕНИЕ: 70% ***
+            if health_pct < 0.70:
                 self.enter_phase_two()
 
-        # 2. ФИНАЛЬНАЯ АТАКА (< 250 HP)
-        # Запускаем только если уже во 2 фазе, не в переходе, и еще не запускали
+        # ФИНАЛЬНАЯ АТАКА (< 250 HP)
         if self.is_phase_two and not self.final_attack_triggered and self.state != self.STATE_PHASE_TRANSITION:
             if self.hp < 250:
                 self.start_final_chaos_attack()
 
-        if self.is_phase_two:
+        # Важно: держать крылья открытыми во второй фазе
+        if self.is_phase_two and self.state != self.STATE_PHASE_TRANSITION:
             self.wing_spread_factor = 1.0 
 
         if self.shield_cooldown_timer > 0: self.shield_cooldown_timer -= 1
@@ -171,10 +323,12 @@ class ArchangelBoss(pygame.sprite.Sprite):
                 self.set_state(self.STATE_HOVER)
         
         elif self.state == self.STATE_CHAOS_BARRAGE:
-            # Плавный дрейф к центру во время ульты
+            # Дрейф к центру во время ульты
             dir_to_center = self.arena_center - self.pos
             if dir_to_center.length() > 5:
                 self.pos += dir_to_center.normalize() * 2.0 
+            # Принудительная поза
+            self.transition_pose_factor = 1.0
                 
         else:
             target_speed = self.move_speed
@@ -188,28 +342,47 @@ class ArchangelBoss(pygame.sprite.Sprite):
                 self.pos += direction.normalize() * target_speed * dt * 60
             
             self.movement_tilt_x = self.movement_tilt_x * 0.9
+        
 
-        # *** ОБНОВЛЕНИЕ ХИТБОКСОВ ***
+        # Обновление хитбоксов
+        self.update_hitboxes()
+        
+        # --- ЛОГИКА ЩИТА (ОБНОВЛЕННАЯ) ---
+        # Щит НЕЛЬЗЯ использовать, если босс занят чем-то важным (копья, ульта, переходы).
+        # Но МОЖНО использовать во время взрыва (PREPARE_SMITE) или отдыха (HOVER).
+        
+        cant_shield_states = [
+            self.STATE_PHASE_TRANSITION, 
+            self.STATE_RECOVERY_PHASE_TWO, 
+            self.STATE_PHASE_TWO_DASH, 
+            self.STATE_CHAOS_BARRAGE,
+            
+            # Группа атаки копьями (НЕПРЕРЫВАЕМАЯ)
+            self.STATE_PREPARE_SPEAR,
+            self.STATE_MIST_EFFECT,
+            self.STATE_LAUNCH_SPEAR,
+            
+            self.STATE_SHIELD_ATTACK   # Уже бьем щитом
+        ]
+        
+        if self.state not in cant_shield_states:
+            dist_to_player = (self.player.pos - self.pos).length()
+            
+            # Проверяем дистанцию и кулдаун щита
+            if dist_to_player < self.SHIELD_ATTACK_RANGE and self.shield_cooldown_timer <= 0:
+                self.set_state(self.STATE_SHIELD_ATTACK)
+        
+        self.update_state_logic(factor)
+
+    def update_hitboxes(self):
         hb_upper = pygame.Rect(0, 0, 50, 120)
         hb_upper.center = (self.pos.x, self.pos.y - 90)
         hb_lower = pygame.Rect(0, 0, 90, 90)
         hb_lower.center = (self.pos.x, self.pos.y + 10)
         self.hitboxes = [hb_upper, hb_lower]
         self.rect = hb_upper.union(hb_lower)
-        
-        # --- ПРОВЕРКА НА БЛИЖНИЙ БОЙ (ЩИТ) ---
-        if self.state not in [self.STATE_PHASE_TRANSITION, self.STATE_RECOVERY_PHASE_TWO, self.STATE_PHASE_TWO_DASH, self.STATE_CHAOS_BARRAGE]:
-            dist_to_player = (self.player.pos - self.pos).length()
-            can_shield_bash = (
-                dist_to_player < self.SHIELD_ATTACK_RANGE and
-                self.shield_cooldown_timer <= 0 and
-                self.state not in [self.STATE_PREPARE_SPEAR, self.STATE_LAUNCH_SPEAR, self.STATE_MIST_EFFECT]
-            )
-            if can_shield_bash:
-                if self.state == self.STATE_HOVER:
-                    self.set_state(self.STATE_SHIELD_ATTACK)
-        
-        # --- ОБНОВЛЕНИЕ МАШИНЫ СОСТОЯНИЙ ---
+
+    def update_state_logic(self, factor):
         if self.state == self.STATE_HOVER:
             self.cooldown_timer -= 1
             anim_recovery_speed = 0.02 if not self.is_phase_two else 0.04
@@ -320,49 +493,59 @@ class ArchangelBoss(pygame.sprite.Sprite):
             self.transition_pose_factor = max(0.0, 1.0 - progress)
             if self.state_timer >= self.PHASE_RECOVERY_DURATION:
                 self.transition_pose_factor = 0.0
-                # *** ИЗМЕНЕНИЕ: Возвращаемся в HOVER, а не в ульту ***
-                # Ульта теперь запускается по условию ХП
                 self.set_state(self.STATE_HOVER)
 
-        # --- СОСТОЯНИЕ ФИНАЛЬНОЙ АТАКИ (CHAOS BARRAGE) ---
         elif self.state == self.STATE_CHAOS_BARRAGE:
-            # Поза
             self.transition_pose_factor = 1.0 
             self.smite_vfx_progress = 0.5     
-            
-            # Эффекты
             self.shake_func(5)
-            
             self.rift_timer += 1
             if self.rift_timer >= self.RIFT_SPAWN_INTERVAL:
                 self.rift_timer = 0
                 self.spawn_chaos_rifts()
             
-            # Конец ульты = Смерть
             if self.state_timer >= self.CHAOS_BARRAGE_DURATION:
-                self.kill() # Босс умирает
+                # БЫЛО: self.kill()
+                # СТАЛО: Переход в состояние смерти после ульты
+                self.set_state(self.STATE_DEATH)
 
     def start_final_chaos_attack(self):
         """Запускает финальную, смертельную атаку."""
         self.set_state(self.STATE_CHAOS_BARRAGE)
         self.final_attack_triggered = True
         self.invulnerable = True # Становится неуязвимым
-        # Сброс других анимаций
         self.spear_animation_progress = 0.0
         self.shield_animation_progress = 0.0
         print("!!! FINAL CHAOS ATTACK STARTED !!!")
 
-    # ... (Остальные методы spawn_chaos_rifts, start_phase_two_dash и т.д. без изменений) ...
     def spawn_chaos_rifts(self):
-        count = random.randint(3, 5)
+        count = random.randint(5, 7)
+        spawned_positions = [] # Список для хранения позиций порталов в этой волне
+
         for _ in range(count):
-            for _ in range(10):
+            for _ in range(15): # Чуть больше попыток, так как условий стало больше
                 x = random.randint(50, WIDTH-50)
                 y = random.randint(50, HEIGHT-50)
                 pos = pygame.math.Vector2(x, y)
-                if abs(pos.x - self.pos.x) > 200 and abs(pos.y - self.pos.y) > 200:
-                    ChaosRiftVFX(pos, self.RIFT_SPAWN_INTERVAL, self.player)
-                    break
+                
+                # 1. Проверка расстояния от БОССА (было раньше)
+                if abs(pos.x - self.pos.x) <= 200 or abs(pos.y - self.pos.y) <= 200:
+                    continue
+
+                # 2. Проверка расстояния от ДРУГИХ ПОРТАЛОВ (новое)
+                too_close = False
+                for existing_pos in spawned_positions:
+                    if abs(pos.x - existing_pos.x) < 150 and abs(pos.y - existing_pos.y) < 150:
+                        too_close = True
+                        break
+                
+                if too_close:
+                    continue
+
+                # Если все проверки пройдены - спавним
+                ChaosRiftVFX(pos, self.RIFT_SPAWN_INTERVAL, self.player)
+                spawned_positions.append(pos)
+                break
 
     def start_phase_two_dash(self):
         self.set_state(self.STATE_PHASE_TWO_DASH)
@@ -370,14 +553,14 @@ class ArchangelBoss(pygame.sprite.Sprite):
         target_x, target_y = self.pos.x, self.pos.y
         for _ in range(15):
             angle = random.uniform(0, math.pi * 2)
-            dist = random.uniform(300, self.MOVEMENT_RADIUS) 
+            # Увеличенная дистанция поиска цели
+            dist = random.uniform(420, self.MOVEMENT_RADIUS) 
             offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
             candidate_x = max(100, min(WIDTH - 100, self.arena_center.x + offset.x))
             candidate_y = max(100, min(HEIGHT - 100, self.arena_center.y + offset.y))
             if abs(candidate_x - self.pos.x) >= 260 and abs(candidate_y - self.pos.y) >= 260:
                 target_x, target_y = candidate_x, candidate_y
                 break
-            target_x, target_y = candidate_x, candidate_y
         self.target_pos = pygame.math.Vector2(target_x, target_y)
         self.shake_func(5)
 
@@ -451,31 +634,20 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def activate_spears_flight(self):
         for spear in self.phantom_spears:
-            pass 
+            spear.activate_flight() 
         self.phantom_spears = [] 
         self.vfx_mist_active = False 
         self.fixed_target_pos = pygame.math.Vector2(0, 0)
             
     def take_damage(self, amount):
-        # *** ИЗМЕНЕНИЕ: Проверка неуязвимости ***
         if self.invulnerable:
-            return # Урон не проходит
-            
+            return 
         self.hp -= amount
+        
         if self.hp <= 0:
-            self.kill()
+            # БЫЛО: self.kill() - мгновенное исчезновение
+            # СТАЛО: Запускаем анимацию смерти
+            self.set_state(self.STATE_DEATH)
 
     def draw_boss_ui(self, surface, offset):
-        bar_w, bar_h = 200, 8
-        bar_x = self.pos.x - bar_w // 2 + offset.x
-        bar_y = self.pos.y - 180 + offset.y
-        pygame.draw.rect(surface, (30, 30, 0), (bar_x, bar_y, bar_w, bar_h))
-        pct = max(0, self.hp / self.max_hp)
-        hp_color = (200, 150, 0) if not self.is_phase_two else (220, 50, 0)
-        
-        # Если неуязвим, полоска серая или особая
-        if self.invulnerable:
-            hp_color = (100, 100, 100)
-            
-        pygame.draw.rect(surface, hp_color, (bar_x, bar_y, bar_w * pct, bar_h))
-        pygame.draw.rect(surface, (255, 215, 50), (bar_x, bar_y, bar_w * pct, bar_h/2))
+        pass

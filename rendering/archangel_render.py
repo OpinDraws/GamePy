@@ -39,6 +39,7 @@ C_SKIN_HIGHLIGHT = (255, 245, 240, 150)
 # *** ДОБАВЛЕНЫ КРАСНЫЕ ЦВЕТА ДЛЯ ФАЗЫ 2 ***
 C_RED_BRIGHT = (255, 50, 50, 255)
 C_RED_GLOW = (255, 100, 100, 150)
+C_RED_DEEP = (150, 0, 0, 255) # Добавим темный красный для наконечника
 
 # --- Хелперы ---
 
@@ -50,57 +51,77 @@ def rotate_point(point, angle_rad, center):
     new_y = temp_x * s + temp_y * c
     return pygame.math.Vector2(new_x + center.x, new_y + center.y)
 
+# *** ДОБАВЬТЕ/ПРОВЕРЬТЕ ЭТУ ФУНКЦИЮ ЗДЕСЬ ***
 def draw_outline(surface, points, width=2, closed=True):
     if len(points) < 2: return
     pygame.draw.lines(surface, C_INK, closed, points, width)
 
 # --- Отрисовка знака Smite с учетом прогресса ---
 # *** ИЗМЕНЕНО: Добавлена смена цвета креста в фазе 2 ***
+# --- Отрисовка знака Smite (КРЕСТ) ---
 def draw_smite_sign(surface, center, progress, is_phase_two=False):
     """
-    Рисует знак атаки над головой босса (синий символ).
-    progress: от 0.0 (начало атаки) до 1.0 (конец атаки, включая фазу исчезновения).
+    Рисует знак атаки над головой босса.
+    progress: от 0.0 до 1.0.
     """
     sign_pos = center + (0, -100)
     
-    # *** ИЗМЕНЕНИЕ: Универсальная логика плавного появления/исчезновения ***
-    # Fade In: 0.0 -> 0.1
+    # Fade In: Быстрое появление
     FADE_IN_END = 0.1
     fade_in = min(1.0, progress / FADE_IN_END)
     
-    # Fade Out: Начинаем плавное исчезновение с 80% прогресса (покрывает последние 0.15-0.2с)
-    FADE_OUT_START = 0.8
+    # Fade Out: Более плавное и раннее исчезновение
+    FADE_OUT_START = 0.7 
     if progress > FADE_OUT_START:
-        # Нормализуем прогресс от 0.8 до 1.0 в диапазон 0.0 до 1.0, затем инвертируем
-        fade_out = 1.0 - (progress - FADE_OUT_START) / (1.0 - FADE_OUT_START)
-        fade_out = max(0.0, fade_out)
+        t = (progress - FADE_OUT_START) / (1.0 - FADE_OUT_START)
+        fade_out = 1.0 - (t * t) # Квадратичное затухание (плавнее)
     else:
         fade_out = 1.0
         
     base_alpha_mult = min(fade_in, fade_out) 
     
-    # Пульсация: Отключаем её, если идет исчезновение, чтобы не было скачков прозрачности
+    # Пульсация
     pulse = 1.0
     if progress <= FADE_OUT_START:
-        pulse = (math.sin(pygame.time.get_ticks() * 0.01) * 0.2 + 0.8)
+        pulse = (math.sin(pygame.time.get_ticks() * 0.015) * 0.2 + 0.9)
         
     alpha = int(255 * base_alpha_mult * pulse) 
     
-    if alpha <= 1:
-        return
+    if alpha <= 5: return
 
-    # Логика цвета: Если фаза 2 и прогресс > 0.3 (примерное время 3-го взрыва), меняем на красный
+    # Логика цвета
     use_red = is_phase_two and progress > 0.3
     
     current_color_bright = C_RED_BRIGHT if use_red else C_CYAN_BRIGHT
     current_color_glow = C_RED_GLOW if use_red else C_CYAN_GLOW
 
     glow_alpha = int(alpha * 0.5)
-    draw_alpha_circle(surface, current_color_glow[:3] + (glow_alpha,), sign_pos, 15 * base_alpha_mult)
-    color = current_color_bright[:3] + (alpha,)
     
-    pygame.draw.line(surface, color, sign_pos + (0, -10), sign_pos + (0, 10), 3)
-    pygame.draw.line(surface, color, sign_pos + (-6, 0), sign_pos + (6, 0), 3)
+    # Свечение
+    draw_alpha_circle(surface, current_color_glow[:3] + (glow_alpha,), sign_pos, 20 * base_alpha_mult)
+    
+    # Рисуем крест ПОЛИГОНАМИ (чтобы цвет точно был правильным и прозрачным)
+    bar_color = current_color_bright[:3] + (alpha,)
+    
+    # Вертикальная палка
+    w, h = 4, 24
+    v_rect = [
+        sign_pos + (-w/2, -h/2),
+        sign_pos + (w/2, -h/2),
+        sign_pos + (w/2, h/2),
+        sign_pos + (-w/2, h/2)
+    ]
+    draw_alpha_polygon(surface, bar_color, v_rect)
+    
+    # Горизонтальная палка
+    w2, h2 = 16, 4
+    h_rect = [
+        sign_pos + (-w2/2, -h2/2),
+        sign_pos + (w2/2, -h2/2),
+        sign_pos + (w2/2, h2/2),
+        sign_pos + (-w2/2, h2/2)
+    ]
+    draw_alpha_polygon(surface, bar_color, h_rect)
 
 
 def draw_spear_projectile(surface, center_pos, angle_deg, alpha=255):
@@ -235,12 +256,25 @@ def calculate_ik_points(shoulder_pos, hand_pos, bend_right=True):
 # --- Основные функции отрисовки (остальные) ---
 
 # *** ИЗМЕНЕНО: Добавлен аргумент movement_tilt_x ***
-def draw_layered_wing(surface, root_pos, angle_deg, scale, time_ticks, flip=False, movement_tilt_x=0.0):
+def draw_layered_wing(surface, root_pos, angle_deg, scale, time_ticks, flip=False, movement_tilt_x=0.0, alpha=255):
+    # Если альфа 0, не рисуем
+    if alpha <= 0: return
+    
+    # Хелпер для применения альфы к цвету
+    def apply_alpha(col, a):
+        if len(col) == 4: return col[:3] + (int(col[3] * (a/255)),)
+        return col + (a,)
+
+    # Применяем прозрачность к цветам слоев
+    color_deep = apply_alpha(C_WING_DEEP, alpha)
+    color_mid = apply_alpha(C_WING_MID, alpha)
+    color_tip = apply_alpha(C_WING_TIP, alpha)
+
     angle_rad = math.radians(angle_deg)
     breath = math.sin(time_ticks * 0.03) * 0.1
     side_mult = 1 if not flip else -1
     
-    drag_angle = -movement_tilt_x * 0.5 # Сила отклонения
+    drag_angle = -movement_tilt_x * 0.5 
     
     tip_angle = angle_rad + (0.5 * side_mult) + (breath * 0.5 * side_mult) + drag_angle
     
@@ -253,9 +287,9 @@ def draw_layered_wing(surface, root_pos, angle_deg, scale, time_ticks, flip=Fals
     spine_points = get_bezier_points(root_pos, end_pos, control_pos, segments=16)
 
     layers = [
-        (C_WING_DEEP, 1.2, 0),    
-        (C_WING_MID, 1.0, -2),    
-        (C_WING_TIP, 0.7, -4)     
+        (color_deep, 1.2, 0),    
+        (color_mid, 1.0, -2),    
+        (color_tip, 0.7, -4)     
     ]
 
     for color, width_mult, y_offset in layers:
@@ -290,7 +324,8 @@ def draw_layered_wing(surface, root_pos, angle_deg, scale, time_ticks, flip=Fals
             poly_points.append(bot_pt)
             
         draw_alpha_polygon(surface, color, poly_points)
-        if color == C_WING_TIP:
+        # Рисуем контур только если крылья достаточно видимы
+        if alpha > 100 and color == color_tip:
              draw_outline(surface, poly_points, width=1)
 
 def draw_flowing_dress(surface, body_center, shoulder_l, shoulder_r, time_ticks):
@@ -319,11 +354,22 @@ def draw_flowing_dress(surface, body_center, shoulder_l, shoulder_r, time_ticks)
     pygame.draw.line(surface, C_INK, neck_base_center, shoulder_l, 2)
     pygame.draw.line(surface, C_INK, neck_base_center, shoulder_r, 2)
 
-def draw_body_and_hair(surface, body_center, shoulder_l, shoulder_r, time_ticks):
+def draw_body_and_hair(surface, body_center, shoulder_l, shoulder_r, time_ticks, death_pose_factor=0.0):
     head_center = body_center + (0, -90)
+    
+    # Поднимаем голову при смерти (чем больше фактор, тем выше)
+    head_offset_y = -5 * death_pose_factor
+    head_center.y += head_offset_y
+    
+    # ... (Весь остальной код внутри этой функции оставляем без изменений) ...
+    # Просто скопируй старое тело функции сюда, поменяв только заголовок и добавив head_offset_y
     
     collar_top_y = shoulder_l.y 
     collar_bottom_y = shoulder_l.y + 10
+    # ... (дальше стандартный код отрисовки тела) ...
+    # Если лень копировать, просто вставь head_center.y += ... после объявления head_center
+    
+    # (Ниже привожу полный код функции для удобства копирования, чтобы не ошибиться)
     collar_width_bottom = 14
     collar_width_top = 10
     collar_poly = [
@@ -409,79 +455,153 @@ def draw_ornate_halo(surface, center, time_ticks):
         spike_end = halo_pos + pygame.math.Vector2(sx * 1.3, sy * 1.3 - 8) 
         pygame.draw.line(surface, C_GOLD_BRIGHT, spike_start, spike_end, 2)
 
-# *** ОБНОВЛЕНО: Добавлен movement_tilt_x для крыльев ***
-def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress=0.0, shield_animation_progress=0.0, is_phase_two=False, wing_spread_factor=0.0, is_transitioning=False, transition_pose_factor=0.0, movement_tilt_x=0.0): 
-    """
-    Отрисовка босса.
-    """
-    center = pygame.math.Vector2(center_pos)
+def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress=0.0, shield_animation_progress=0.0, is_phase_two=False, wing_spread_factor=0.0, is_transitioning=False, transition_pose_factor=0.0, movement_tilt_x=0.0, alpha=255, is_final_attack=False, death_params=None): 
+    if alpha <= 0: return
+    if death_params is None: death_params = {}
+    
+    surf_w, surf_h = 600, 600
+    temp_surf = pygame.Surface((surf_w, surf_h), pygame.SRCALPHA)
+    local_center = pygame.math.Vector2(surf_w // 2, surf_h // 2)
+    
+    _draw_archangel_internal(temp_surf, local_center, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress, shield_animation_progress, is_phase_two, wing_spread_factor, is_transitioning, transition_pose_factor, movement_tilt_x, is_final_attack, death_params)
+    
+    if alpha < 255:
+        temp_surf.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+    dest_pos = (center_pos[0] - surf_w // 2, center_pos[1] - surf_h // 2)
+    surface.blit(temp_surf, dest_pos)
+
+# Переименовали старую функцию draw_archangel_boss в _draw_archangel_internal
+# Она делает всю грязную работу по рисованию линий
+def _draw_archangel_internal(surface, draw_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress, shield_animation_progress, is_phase_two, wing_spread_factor, is_transitioning, transition_pose_factor, movement_tilt_x, is_final_attack, death_params):
     
     hover_amp = 8
-    if is_transitioning:
-        hover_amp = 12
-        
+    if is_transitioning: hover_amp = 12
     hover = math.sin(time_ticks * 0.04) * hover_amp
-    draw_pos = center + pygame.math.Vector2(0, hover - 30)
+    draw_pos = draw_pos + pygame.math.Vector2(0, hover - 30)
 
-    if not math.isfinite(draw_pos.x) or not math.isfinite(draw_pos.y):
-        return
-    
     shoulder_width = 22
     shoulder_height = -62 
     shoulder_l = draw_pos + (-shoulder_width, shoulder_height)
     shoulder_r = draw_pos + (shoulder_width, shoulder_height)
     
+    # --- ПАРАМЕТРЫ СМЕРТИ ---
+    death_pose_factor = death_params.get('pose_factor', 0.0)
+    death_item_alpha = death_params.get('item_alpha', 255)
+    death_wing_alpha = death_params.get('wing_alpha', 255)
+    death_wing_offset = death_params.get('wing_offset', 0.0)
+    death_light_scale = death_params.get('light_scale', 0.0) # НОВОЕ
+    death_flash_alpha = death_params.get('flash_alpha', 0)   # НОВОЕ
+
+    # --- 0. СВЕТ НАКОПЛЕНИЯ (Позади босса) ---
+    if death_light_scale > 0:
+        # Большой светящийся круг сзади
+        light_radius = 150 * death_light_scale
+        # Пульсация
+        pulse = 1.0 + 0.1 * math.sin(time_ticks * 0.2)
+        
+        # Внешний ореол
+        draw_alpha_circle(surface, (255, 220, 150, int(100 * death_light_scale)), draw_pos, light_radius * 1.5 * pulse)
+        # Ядро света
+        draw_alpha_circle(surface, (255, 255, 200, int(150 * death_light_scale)), draw_pos, light_radius * pulse)
+        # Лучи
+        if death_light_scale > 0.5:
+            for i in range(8):
+                angle = time_ticks * 0.05 + i * (math.pi / 4)
+                ray_end = draw_pos + pygame.math.Vector2(math.cos(angle), math.sin(angle)) * (light_radius * 2)
+                ray_color = (255, 255, 255, int(100 * (death_light_scale - 0.5) * 2))
+                pygame.draw.line(surface, ray_color, draw_pos, ray_end, 4)
+
     # 1. Крылья
+    wing_shift_l = pygame.math.Vector2(-death_wing_offset, 0)
+    wing_shift_r = pygame.math.Vector2(death_wing_offset, 0)
     wing_root = draw_pos + (0, shoulder_height)
-    
-    # Плавный переход угла крыльев
     spread_angle_offset = -30 * wing_spread_factor 
     
-    # Передаем movement_tilt_x в функцию рисования крыльев
-    draw_layered_wing(surface, wing_root, 230 + spread_angle_offset, 50, time_ticks, flip=False, movement_tilt_x=movement_tilt_x) 
-    draw_layered_wing(surface, wing_root, -50 - spread_angle_offset, 50, time_ticks, flip=True, movement_tilt_x=movement_tilt_x)  
+    draw_layered_wing(surface, wing_root + wing_shift_l, 230 + spread_angle_offset, 50, time_ticks, flip=False, movement_tilt_x=movement_tilt_x, alpha=death_wing_alpha) 
+    draw_layered_wing(surface, wing_root + wing_shift_r, -50 - spread_angle_offset, 50, time_ticks, flip=True, movement_tilt_x=movement_tilt_x, alpha=death_wing_alpha)  
+    draw_layered_wing(surface, draw_pos + (0, shoulder_height + 20) + wing_shift_l, 200 + spread_angle_offset, 70, time_ticks + 10, flip=False, movement_tilt_x=movement_tilt_x, alpha=death_wing_alpha) 
+    draw_layered_wing(surface, draw_pos + (0, shoulder_height + 20) + wing_shift_r, -20 - spread_angle_offset, 70, time_ticks + 10, flip=True, movement_tilt_x=movement_tilt_x, alpha=death_wing_alpha)  
     
-    draw_layered_wing(surface, draw_pos + (0, shoulder_height + 20), 200 + spread_angle_offset, 70, time_ticks + 10, flip=False, movement_tilt_x=movement_tilt_x) 
-    draw_layered_wing(surface, draw_pos + (0, shoulder_height + 20), -20 - spread_angle_offset, 70, time_ticks + 10, flip=True, movement_tilt_x=movement_tilt_x)  
-    
-    # 2. Нимб
+    # 2. Тело
     draw_ornate_halo(surface, draw_pos, time_ticks)
-
-    # 3. Тело
     draw_flowing_dress(surface, draw_pos, shoulder_l, shoulder_r, time_ticks)
-    draw_body_and_hair(surface, draw_pos, shoulder_l, shoulder_r, time_ticks) 
+    draw_body_and_hair(surface, draw_pos, shoulder_l, shoulder_r, time_ticks, death_pose_factor=death_pose_factor) 
     
-    # 4. Руки и Оружие
     current_spear_prog = spear_animation_progress
     current_shield_prog = shield_animation_progress
-    
     is_arms_in_transition = transition_pose_factor > 0.001
     
     draw_equipment_and_arms_custom(
         surface, draw_pos, shoulder_l, shoulder_r, time_ticks, 
         current_spear_prog, current_shield_prog, 
         is_transitioning=is_arms_in_transition, 
-        transition_factor=transition_pose_factor
+        transition_factor=transition_pose_factor,
+        use_red_glow=is_final_attack,
+        death_pose_factor=death_pose_factor,
+        item_alpha=death_item_alpha
     )
     
-    # 5. Индикатор Smite
     if smite_vfx_progress > 0.0: 
-        # *** ИЗМЕНЕНО: Передаем is_phase_two ***
         draw_smite_sign(surface, draw_pos, smite_vfx_progress, is_phase_two)
-    
-    return []
 
-# --- КОПИЯ ФУНКЦИИ С ДОБАВЛЕННОЙ ЛОГИКОЙ ПЕРЕХОДА ---
-def draw_equipment_and_arms_custom(surface, body_center, shoulder_l, shoulder_r, time_ticks, spear_animation_progress, shield_animation_progress, is_transitioning=False, transition_factor=0.0):
+    # --- 99. ФИНАЛЬНАЯ ВСПЫШКА (Поверх всего) ---
+    if death_flash_alpha > 0:
+        # Рисуем просто белый круг или заливаем фигуру белым
+        # Если нарисовать круг поверх, он перекроет детали. 
+        # Это то, что нужно для "исчезновения в свете".
+        draw_alpha_circle(surface, (255, 255, 255, death_flash_alpha), draw_pos, 150)
+        # Дополнительное сияние
+        draw_alpha_circle(surface, (255, 255, 200, int(death_flash_alpha * 0.5)), draw_pos, 200)
+
+# --- ОБНОВЛЕНА СИГНАТУРА: добавлен is_final_attack ---
+def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress=0.0, shield_animation_progress=0.0, is_phase_two=False, wing_spread_factor=0.0, is_transitioning=False, transition_pose_factor=0.0, movement_tilt_x=0.0, alpha=255, is_final_attack=False, death_params=None): 
+    if alpha <= 0: return
+    
+    # Если параметры смерти не переданы, используем пустой словарь
+    if death_params is None: 
+        death_params = {}
+    
+    surf_w, surf_h = 600, 600
+    temp_surf = pygame.Surface((surf_w, surf_h), pygame.SRCALPHA)
+    local_center = pygame.math.Vector2(surf_w // 2, surf_h // 2)
+    
+    # --- ИСПРАВЛЕНИЕ: Добавлен аргумент death_params в вызов ---
+    _draw_archangel_internal(
+        temp_surf, 
+        local_center, 
+        time_ticks, 
+        spear_animation_progress, 
+        is_mist_active, 
+        mist_timer, 
+        fixed_target_pos, 
+        smite_vfx_progress, 
+        shield_animation_progress, 
+        is_phase_two, 
+        wing_spread_factor, 
+        is_transitioning, 
+        transition_pose_factor, 
+        movement_tilt_x, 
+        is_final_attack, 
+        death_params  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО
+    )
+    
+    if alpha < 255:
+        temp_surf.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
+    dest_pos = (center_pos[0] - surf_w // 2, center_pos[1] - surf_h // 2)
+    surface.blit(temp_surf, dest_pos)
+
+# --- ОБНОВЛЕНА СИГНАТУРА: добавлен use_red_glow ---
+def draw_equipment_and_arms_custom(surface, body_center, shoulder_l, shoulder_r, time_ticks, spear_animation_progress, shield_animation_progress, is_transitioning=False, transition_factor=0.0, use_red_glow=False, death_pose_factor=0.0, item_alpha=255):
     arm_bob_y = math.sin(time_ticks * 0.05) * -2 
     arm_bob_x = math.cos(time_ticks * 0.04) * 2
     
-    # ================== ЛЕВАЯ РУКА (КОПЬЕ) ==================
+    # Позиции для смерти (кисти вверх, поза мольбы)
+    DEATH_HAND_POS_L = pygame.math.Vector2(-30, -55)
+    DEATH_HAND_POS_R = pygame.math.Vector2(30, -55)
     
+    # ================== ЛЕВАЯ РУКА (КОПЬЕ) ==================
     REST_POS = pygame.math.Vector2(-80, -10) 
     RAISED_POS = pygame.math.Vector2(-70, -95) 
-    
-    # Поза перехода: Копье поднято ВЫСОКО ВВЕРХ И В СТОРОНУ (Победная поза)
     TRANSITION_SPEAR_POS = pygame.math.Vector2(-90, -110)
     
     progress = spear_animation_progress
@@ -491,106 +611,294 @@ def draw_equipment_and_arms_custom(surface, body_center, shoulder_l, shoulder_r,
     if is_transitioning:
         target_pos_base = target_pos_base.lerp(TRANSITION_SPEAR_POS, transition_factor)
     
+    # Интерполяция в позу смерти
+    if death_pose_factor > 0:
+        target_pos_base = target_pos_base.lerp(DEATH_HAND_POS_L, death_pose_factor)
+
     hand_l_pos = body_center + target_pos_base + pygame.math.Vector2(-arm_bob_x, arm_bob_y) 
     shoulder_l_pos, elbow_l_pos, hand_l_ik_pos = calculate_ik_points(shoulder_l, hand_l_pos, bend_right=True)
 
     draw_arm_sleeve_only(surface, shoulder_l_pos, elbow_l_pos, hand_l_ik_pos, bend_right=False)
     
-    glow_active = max(0.0, progress)
-    if is_transitioning: glow_active = transition_factor 
-        
-    energy_pulse = math.sin(time_ticks * 0.1) * 0.05 + 0.95
-    glow_alpha = int(150 * glow_active * energy_pulse) 
-    
+    # --- РАСЧЕТ УГЛА КОПЬЯ (ВЫНЕСЕН ИЗ БЛОКА IF) ---
     DEFAULT_SPEAR_ANGLE_DEG = -90  
     RAISED_SPEAR_ANGLE_DEG = -130 
     TRANSITION_SPEAR_ANGLE = -100 
-    
     current_angle = DEFAULT_SPEAR_ANGLE_DEG + (RAISED_SPEAR_ANGLE_DEG - DEFAULT_SPEAR_ANGLE_DEG) * smooth_progress
     if is_transitioning:
         current_angle = current_angle * (1.0 - transition_factor) + TRANSITION_SPEAR_ANGLE * transition_factor
         
+    # При смерти копье может немного наклониться (например, до -45)
+    if death_pose_factor > 0:
+            current_angle = current_angle * (1.0 - death_pose_factor) + (-45) * death_pose_factor
+
     spear_angle_rad = math.radians(current_angle)
     spear_dir = pygame.math.Vector2(math.cos(spear_angle_rad), math.sin(spear_angle_rad)).normalize()
-    
-    spear_top = hand_l_ik_pos + spear_dir * 75
-    spear_bottom = hand_l_ik_pos - spear_dir * 85
-    
-    pygame.draw.line(surface, C_SPEAR_SHADOW, spear_top, spear_bottom, 7)
-    pygame.draw.line(surface, C_SPEAR_SHAFT, spear_top, spear_bottom, 5)
-    pygame.draw.line(surface, C_SPEAR_HIGHLIGHT, spear_top + pygame.math.Vector2(1.5, -1.5), spear_bottom + pygame.math.Vector2(1.5, -1.5), 2)
 
-    if glow_alpha > 0:
-        num_cuts = 4
-        shaft_len = (spear_bottom - spear_top).length()
-        perp_vec = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 3
-        for i in range(num_cuts):
-            progress_offset = (time_ticks * 0.05 + i * 1.5) % (shaft_len / 20) / (shaft_len / 20) 
-            p_start_base = spear_bottom.lerp(spear_top, progress_offset)
-            p_end_base = spear_bottom.lerp(spear_top, (progress_offset + 0.2) % 1.0) 
-            for j in range(3):
-                twist_mult = math.sin(time_ticks * 0.1 + i) * 0.5 
-                p_start = p_start_base + perp_vec * (0.5 + twist_mult) * (j / 2)
-                p_end = p_end_base + perp_vec * (-0.5 - twist_mult) * (j / 2)
-                color = C_CYAN_BRIGHT[:3] + (glow_alpha // (j + 1) // 2,)
-                pygame.draw.line(surface, color, p_start, p_end, 5 - j * 1)
-    
-    guard_pos = spear_top - spear_dir * 5
-    draw_alpha_circle(surface, C_GOLD_ORNAMENT, guard_pos, 5)
-    pygame.draw.circle(surface, C_INK, (int(guard_pos.x), int(guard_pos.y)), 5, 1)
+    # --- ОТРИСОВКА КОПЬЯ (С ПРОЗРАЧНОСТЬЮ) ---
+    if item_alpha > 5: # Рисуем только если хоть немного видно
+        spear_surf = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        
+        glow_active = max(0.0, progress)
+        if is_transitioning: glow_active = transition_factor 
+        energy_pulse = math.sin(time_ticks * 0.1) * 0.05 + 0.95
+        glow_alpha = int(150 * glow_active * energy_pulse) 
+        
+        spear_top = hand_l_ik_pos + spear_dir * 75
+        spear_bottom = hand_l_ik_pos - spear_dir * 85
+        
+        # Рисуем копье на временной поверхности
+        pygame.draw.line(spear_surf, C_SPEAR_SHADOW, spear_top, spear_bottom, 7)
+        pygame.draw.line(spear_surf, C_SPEAR_SHAFT, spear_top, spear_bottom, 5)
+        pygame.draw.line(spear_surf, C_SPEAR_HIGHLIGHT, spear_top + pygame.math.Vector2(1.5, -1.5), spear_bottom + pygame.math.Vector2(1.5, -1.5), 2)
 
-    tip_center = spear_top + spear_dir * 10
-    tip_perp = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 12
-    tip_poly = [
-        tip_center + spear_dir * 30, tip_center - spear_dir * 10 - tip_perp, 
-        tip_center - spear_dir * 5, tip_center - spear_dir * 10 + tip_perp  
-    ]
-    draw_alpha_circle(surface, C_CYAN_GLOW[:3] + (glow_alpha,), tip_center, 35)
-    draw_alpha_polygon(surface, C_CYAN_BRIGHT, [tip_poly[0], tip_poly[1], tip_poly[3]])
-    draw_alpha_polygon(surface, C_CYAN_DEEP, [tip_poly[1], tip_poly[2], tip_poly[3]])
-    draw_outline(surface, tip_poly, width=1)
-    
-    spear_grip_start = hand_l_ik_pos + spear_dir * -5 
-    spear_grip_end = hand_l_ik_pos + spear_dir * 5 
+        # Цвета свечения
+        if use_red_glow:
+            glow_color_bright = C_RED_BRIGHT
+            glow_color_deep = C_RED_DEEP
+            glow_color_ambient = C_RED_GLOW
+        else:
+            glow_color_bright = C_CYAN_BRIGHT
+            glow_color_deep = C_CYAN_DEEP
+            glow_color_ambient = C_CYAN_GLOW
+
+        if glow_alpha > 0:
+            num_cuts = 4
+            perp_vec = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 3
+            for i in range(num_cuts):
+                progress_offset = (time_ticks * 0.05 + i * 1.5) % ((spear_bottom - spear_top).length() / 20) / ((spear_bottom - spear_top).length() / 20) 
+                p_start_base = spear_bottom.lerp(spear_top, progress_offset)
+                p_end_base = spear_bottom.lerp(spear_top, (progress_offset + 0.2) % 1.0) 
+                for j in range(3):
+                    twist_mult = math.sin(time_ticks * 0.1 + i) * 0.5 
+                    p_start = p_start_base + perp_vec * (0.5 + twist_mult) * (j / 2)
+                    p_end = p_end_base + perp_vec * (-0.5 - twist_mult) * (j / 2)
+                    color = glow_color_bright[:3] + (glow_alpha // (j + 1) // 2,)
+                    pygame.draw.line(spear_surf, color, p_start, p_end, 5 - j * 1)
+        
+        guard_pos = spear_top - spear_dir * 5
+        draw_alpha_circle(spear_surf, C_GOLD_ORNAMENT, guard_pos, 5)
+        pygame.draw.circle(spear_surf, C_INK, (int(guard_pos.x), int(guard_pos.y)), 5, 1)
+
+        tip_center = spear_top + spear_dir * 10
+        tip_perp = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 12
+        tip_poly = [tip_center + spear_dir * 30, tip_center - spear_dir * 10 - tip_perp, tip_center - spear_dir * 5, tip_center - spear_dir * 10 + tip_perp]
+        
+        draw_alpha_circle(spear_surf, glow_color_ambient[:3] + (glow_alpha,), tip_center, 35)
+        draw_alpha_polygon(spear_surf, glow_color_bright, [tip_poly[0], tip_poly[1], tip_poly[3]])
+        draw_alpha_polygon(spear_surf, glow_color_deep, [tip_poly[1], tip_poly[2], tip_poly[3]])
+        draw_outline(spear_surf, tip_poly, width=1)
+        
+        # ПРИМЕНЯЕМ ПРОЗРАЧНОСТЬ К КОПЬЮ
+        if item_alpha < 255:
+            spear_surf.fill((255, 255, 255, item_alpha), special_flags=pygame.BLEND_RGBA_MULT)
+        
+        surface.blit(spear_surf, (0,0))
+
+    # Кисть
     hand_angle = current_angle + 90
-    draw_hand_holding_spear(surface, hand_l_ik_pos, spear_grip_start, spear_grip_end, is_left_hand=True, angle_deg=hand_angle)
-    
+    # Если оружие почти исчезло, рисуем просто кулак, иначе "держащий"
+    if item_alpha < 50:
+        draw_hand_fist(surface, hand_l_ik_pos, C_SKIN, is_left_hand=True, angle_deg=hand_angle)
+    else:
+        spear_grip_start = hand_l_ik_pos + spear_dir * -5 
+        spear_grip_end = hand_l_ik_pos + spear_dir * 5 
+        draw_hand_holding_spear(surface, hand_l_ik_pos, spear_grip_start, spear_grip_end, is_left_hand=True, angle_deg=hand_angle)
     
     # ================== ПРАВАЯ РУКА (ЩИТ) ==================
     arm_bob_x_r = math.cos(time_ticks * 0.04) * -2 
-    
-    # Rest: Рука справа, опущена
     hand_r_rest_pos = pygame.math.Vector2(30, 0) 
-    # Bash: Рука прижата к груди (центр)
     hand_r_bash_pos = pygame.math.Vector2(5, -25) 
-    
-    # Transition: Рука широко расставлена
     TRANSITION_HAND_POS = pygame.math.Vector2(80, -10)
     
     t = shield_animation_progress
     shield_smooth = t * t * (3 - 2 * t)
-    
     current_hand_pos_local = hand_r_rest_pos.lerp(hand_r_bash_pos, shield_smooth)
-    
     if is_transitioning:
         current_hand_pos_local = current_hand_pos_local.lerp(TRANSITION_HAND_POS, transition_factor)
-        
-    hand_r_pos = body_center + current_hand_pos_local + pygame.math.Vector2(arm_bob_x_r, arm_bob_y)
     
+    # Интерполяция в позу смерти
+    if death_pose_factor > 0:
+        current_hand_pos_local = current_hand_pos_local.lerp(DEATH_HAND_POS_R, death_pose_factor)
+
+    hand_r_pos = body_center + current_hand_pos_local + pygame.math.Vector2(arm_bob_x_r, arm_bob_y)
     shoulder_r_pos, elbow_r_pos, hand_r_ik_pos = calculate_ik_points(shoulder_r, hand_r_pos, bend_right=True)
     
     draw_arm_sleeve_only(surface, shoulder_r_pos, elbow_r_pos, hand_r_ik_pos, bend_right=True)
     draw_hand_fist(surface, hand_r_ik_pos, C_SKIN, is_left_hand=False, angle_deg=10)
 
-    shield_offset = pygame.math.Vector2(5, 0) 
-    shield_center = hand_r_ik_pos + shield_offset
+    # --- ОТРИСОВКА ЩИТА (С ПРОЗРАЧНОСТЬЮ) ---
+    if item_alpha > 5:
+        shield_surf = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        shield_offset = pygame.math.Vector2(5, 0) 
+        shield_center = hand_r_ik_pos + shield_offset
+        
+        draw_alpha_circle(shield_surf, C_GOLD_DARK, shield_center, 30)
+        draw_alpha_circle(shield_surf, C_GOLD_BRIGHT, shield_center, 24)
+        pygame.draw.circle(shield_surf, C_INK, (int(shield_center.x), int(shield_center.y)), 30, 2)
+        for i in range(8):
+            angle = i * (math.pi * 2 / 8)
+            end = shield_center + pygame.math.Vector2(math.cos(angle), math.sin(angle)) * 24
+            pygame.draw.line(shield_surf, C_GOLD_DARK, shield_center, end, 2)
+        draw_alpha_circle(shield_surf, C_GOLD_BRIGHT, shield_center, 8)
+        pygame.draw.circle(shield_surf, C_INK, (int(shield_center.x), int(shield_center.y)), 8, 1)
+        
+        # Применяем прозрачность к щиту
+        if item_alpha < 255:
+            shield_surf.fill((255, 255, 255, item_alpha), special_flags=pygame.BLEND_RGBA_MULT)
+        
+        surface.blit(shield_surf, (0,0))
+    arm_bob_y = math.sin(time_ticks * 0.05) * -2 
+    arm_bob_x = math.cos(time_ticks * 0.04) * 2
+    
+    # Позиции для смерти (кисти вверх, поза мольбы)
+    DEATH_HAND_POS_L = pygame.math.Vector2(-120, -90)
+    DEATH_HAND_POS_R = pygame.math.Vector2(120, -90)
 
-    draw_alpha_circle(surface, C_GOLD_DARK, shield_center, 30)
-    draw_alpha_circle(surface, C_GOLD_BRIGHT, shield_center, 24)
-    pygame.draw.circle(surface, C_INK, (int(shield_center.x), int(shield_center.y)), 30, 2)
-    for i in range(8):
-        angle = i * (math.pi * 2 / 8)
-        end = shield_center + pygame.math.Vector2(math.cos(angle), math.sin(angle)) * 24
-        pygame.draw.line(surface, C_GOLD_DARK, shield_center, end, 2)
-    draw_alpha_circle(surface, C_GOLD_BRIGHT, shield_center, 8)
-    pygame.draw.circle(surface, C_INK, (int(shield_center.x), int(shield_center.y)), 8, 1)
+    # ================== ЛЕВАЯ РУКА (КОПЬЕ) ==================
+    REST_POS = pygame.math.Vector2(-80, -10) 
+    RAISED_POS = pygame.math.Vector2(-70, -95) 
+    TRANSITION_SPEAR_POS = pygame.math.Vector2(-90, -110)
+    
+    progress = spear_animation_progress
+    smooth_progress = 1 - (1 - progress)**3 
+    target_pos_base = REST_POS.lerp(RAISED_POS, smooth_progress)
+    
+    if is_transitioning:
+        target_pos_base = target_pos_base.lerp(TRANSITION_SPEAR_POS, transition_factor)
+    
+    # Интерполяция в позу смерти
+    if death_pose_factor > 0:
+        target_pos_base = target_pos_base.lerp(DEATH_HAND_POS_L, death_pose_factor)
+
+    hand_l_pos = body_center + target_pos_base + pygame.math.Vector2(-arm_bob_x, arm_bob_y) 
+    shoulder_l_pos, elbow_l_pos, hand_l_ik_pos = calculate_ik_points(shoulder_l, hand_l_pos, bend_right=True)
+
+    draw_arm_sleeve_only(surface, shoulder_l_pos, elbow_l_pos, hand_l_ik_pos, bend_right=False)
+    
+    # --- ОТРИСОВКА КОПЬЯ (С ПРОЗРАЧНОСТЬЮ) ---
+    if item_alpha > 5: # Рисуем только если хоть немного видно
+        spear_surf = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        
+        glow_active = max(0.0, progress)
+        if is_transitioning: glow_active = transition_factor 
+        energy_pulse = math.sin(time_ticks * 0.1) * 0.05 + 0.95
+        glow_alpha = int(150 * glow_active * energy_pulse) 
+        
+        DEFAULT_SPEAR_ANGLE_DEG = -90  
+        RAISED_SPEAR_ANGLE_DEG = -130 
+        TRANSITION_SPEAR_ANGLE = -100 
+        current_angle = DEFAULT_SPEAR_ANGLE_DEG + (RAISED_SPEAR_ANGLE_DEG - DEFAULT_SPEAR_ANGLE_DEG) * smooth_progress
+        if is_transitioning:
+            current_angle = current_angle * (1.0 - transition_factor) + TRANSITION_SPEAR_ANGLE * transition_factor
+            
+        # При смерти копье может немного наклониться (например, до -45)
+        if death_pose_factor > 0:
+             current_angle = current_angle * (1.0 - death_pose_factor) + (-45) * death_pose_factor
+
+        spear_angle_rad = math.radians(current_angle)
+        spear_dir = pygame.math.Vector2(math.cos(spear_angle_rad), math.sin(spear_angle_rad)).normalize()
+        spear_top = hand_l_ik_pos + spear_dir * 75
+        spear_bottom = hand_l_ik_pos - spear_dir * 85
+        
+        # Рисуем копье на временной поверхности
+        pygame.draw.line(spear_surf, C_SPEAR_SHADOW, spear_top, spear_bottom, 7)
+        pygame.draw.line(spear_surf, C_SPEAR_SHAFT, spear_top, spear_bottom, 5)
+        pygame.draw.line(spear_surf, C_SPEAR_HIGHLIGHT, spear_top + pygame.math.Vector2(1.5, -1.5), spear_bottom + pygame.math.Vector2(1.5, -1.5), 2)
+
+        # Цвета свечения
+        if use_red_glow:
+            glow_color_bright = C_RED_BRIGHT
+            glow_color_deep = C_RED_DEEP
+            glow_color_ambient = C_RED_GLOW
+        else:
+            glow_color_bright = C_CYAN_BRIGHT
+            glow_color_deep = C_CYAN_DEEP
+            glow_color_ambient = C_CYAN_GLOW
+
+        if glow_alpha > 0:
+            num_cuts = 4
+            perp_vec = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 3
+            for i in range(num_cuts):
+                progress_offset = (time_ticks * 0.05 + i * 1.5) % ((spear_bottom - spear_top).length() / 20) / ((spear_bottom - spear_top).length() / 20) 
+                p_start_base = spear_bottom.lerp(spear_top, progress_offset)
+                p_end_base = spear_bottom.lerp(spear_top, (progress_offset + 0.2) % 1.0) 
+                for j in range(3):
+                    twist_mult = math.sin(time_ticks * 0.1 + i) * 0.5 
+                    p_start = p_start_base + perp_vec * (0.5 + twist_mult) * (j / 2)
+                    p_end = p_end_base + perp_vec * (-0.5 - twist_mult) * (j / 2)
+                    color = glow_color_bright[:3] + (glow_alpha // (j + 1) // 2,)
+                    pygame.draw.line(spear_surf, color, p_start, p_end, 5 - j * 1)
+        
+        guard_pos = spear_top - spear_dir * 5
+        draw_alpha_circle(spear_surf, C_GOLD_ORNAMENT, guard_pos, 5)
+        pygame.draw.circle(spear_surf, C_INK, (int(guard_pos.x), int(guard_pos.y)), 5, 1)
+
+        tip_center = spear_top + spear_dir * 10
+        tip_perp = pygame.math.Vector2(-spear_dir.y, spear_dir.x) * 12
+        tip_poly = [tip_center + spear_dir * 30, tip_center - spear_dir * 10 - tip_perp, tip_center - spear_dir * 5, tip_center - spear_dir * 10 + tip_perp]
+        
+        draw_alpha_circle(spear_surf, glow_color_ambient[:3] + (glow_alpha,), tip_center, 35)
+        draw_alpha_polygon(spear_surf, glow_color_bright, [tip_poly[0], tip_poly[1], tip_poly[3]])
+        draw_alpha_polygon(spear_surf, glow_color_deep, [tip_poly[1], tip_poly[2], tip_poly[3]])
+        draw_outline(spear_surf, tip_poly, width=1)
+        
+        # ПРИМЕНЯЕМ ПРОЗРАЧНОСТЬ К КОПЬЮ
+        if item_alpha < 255:
+            spear_surf.fill((255, 255, 255, item_alpha), special_flags=pygame.BLEND_RGBA_MULT)
+        
+        surface.blit(spear_surf, (0,0))
+
+    # Кисть
+    hand_angle = current_angle + 90
+    # Если оружие почти исчезло, рисуем просто кулак, иначе "держащий"
+    if item_alpha < 50:
+        draw_hand_fist(surface, hand_l_ik_pos, C_SKIN, is_left_hand=True, angle_deg=hand_angle)
+    else:
+        spear_grip_start = hand_l_ik_pos + spear_dir * -5 
+        spear_grip_end = hand_l_ik_pos + spear_dir * 5 
+        draw_hand_holding_spear(surface, hand_l_ik_pos, spear_grip_start, spear_grip_end, is_left_hand=True, angle_deg=hand_angle)
+    
+    # ================== ПРАВАЯ РУКА (ЩИТ) ==================
+    arm_bob_x_r = math.cos(time_ticks * 0.04) * -2 
+    hand_r_rest_pos = pygame.math.Vector2(30, 0) 
+    hand_r_bash_pos = pygame.math.Vector2(5, -25) 
+    TRANSITION_HAND_POS = pygame.math.Vector2(80, -10)
+    
+    t = shield_animation_progress
+    shield_smooth = t * t * (3 - 2 * t)
+    current_hand_pos_local = hand_r_rest_pos.lerp(hand_r_bash_pos, shield_smooth)
+    if is_transitioning:
+        current_hand_pos_local = current_hand_pos_local.lerp(TRANSITION_HAND_POS, transition_factor)
+    
+    # Интерполяция в позу смерти
+    if death_pose_factor > 0:
+        current_hand_pos_local = current_hand_pos_local.lerp(DEATH_HAND_POS_R, death_pose_factor)
+
+    hand_r_pos = body_center + current_hand_pos_local + pygame.math.Vector2(arm_bob_x_r, arm_bob_y)
+    shoulder_r_pos, elbow_r_pos, hand_r_ik_pos = calculate_ik_points(shoulder_r, hand_r_pos, bend_right=True)
+    
+    draw_arm_sleeve_only(surface, shoulder_r_pos, elbow_r_pos, hand_r_ik_pos, bend_right=True)
+    draw_hand_fist(surface, hand_r_ik_pos, C_SKIN, is_left_hand=False, angle_deg=10)
+
+    # --- ОТРИСОВКА ЩИТА (С ПРОЗРАЧНОСТЬЮ) ---
+    if item_alpha > 5:
+        shield_surf = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+        shield_offset = pygame.math.Vector2(5, 0) 
+        shield_center = hand_r_ik_pos + shield_offset
+        
+        draw_alpha_circle(shield_surf, C_GOLD_DARK, shield_center, 30)
+        draw_alpha_circle(shield_surf, C_GOLD_BRIGHT, shield_center, 24)
+        pygame.draw.circle(shield_surf, C_INK, (int(shield_center.x), int(shield_center.y)), 30, 2)
+        for i in range(8):
+            angle = i * (math.pi * 2 / 8)
+            end = shield_center + pygame.math.Vector2(math.cos(angle), math.sin(angle)) * 24
+            pygame.draw.line(shield_surf, C_GOLD_DARK, shield_center, end, 2)
+        draw_alpha_circle(shield_surf, C_GOLD_BRIGHT, shield_center, 8)
+        pygame.draw.circle(shield_surf, C_INK, (int(shield_center.x), int(shield_center.y)), 8, 1)
+        
+        # Применяем прозрачность к щиту
+        if item_alpha < 255:
+            shield_surf.fill((255, 255, 255, item_alpha), special_flags=pygame.BLEND_RGBA_MULT)
+        
+        surface.blit(shield_surf, (0,0))
