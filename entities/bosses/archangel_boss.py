@@ -64,7 +64,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
     DASH_COOLDOWN = 210 
     DASH_DURATION = 18
     # *** ИЗМЕНЕНИЕ 1: Увеличено с 400 до 560 (1.4x) для широких экранов ***
-    MOVEMENT_RADIUS = 560 
+    MOVEMENT_RADIUS = 800 
     
     # --- КОНСТАНТЫ ДЛЯ CHAOS BARRAGE ---
     CHAOS_BARRAGE_DURATION = 600 # 10 секунд ульты
@@ -82,16 +82,19 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def __init__(self, x, y, player):
         super().__init__()
-        # НЕ добавляем в enemies сразу, чтобы не били, пока не появится
         self.groups = all_sprites
         pygame.sprite.Sprite.__init__(self, self.groups)
         
         self.player = player
+        
+        # Исходная точка (ЦЕЛЬ) - это Центр Круга
         self.spawn_pos = pygame.math.Vector2(x, y) 
         
-        # СМЕЩЕНИЕ ПОРТАЛА: Портал рисуется на spawn_pos.y - 400
-        # Значит, босс должен вылетать из Y - 400
+        # Смещение портала ВВЕРХ
+        # БЫЛО: 400. СТАЛО: 300. (Чтобы "чуть выше центра")
         self.portal_offset_y = 400 
+        
+        # При инициализации ставим босса сразу ВВЕРХУ (в портал)
         self.pos = pygame.math.Vector2(x, y - self.portal_offset_y) 
         
         self.rect = pygame.Rect(x - 40, y - 20, 80, 60)
@@ -160,13 +163,17 @@ class ArchangelBoss(pygame.sprite.Sprite):
     def spawn_boss(self):
         """Вызвать босса (начать интро)."""
         if self.state == self.STATE_HIDDEN:
-            print("BOSS SPAWN SEQUENCE INITIATED")
+            print(f"BOSS SPAWN: Target={self.spawn_pos} (Center), Offset={self.portal_offset_y}")
             self.state = self.STATE_INTRO
             self.state_timer = 0
             self.is_active = True
-            # Ставим босса ВНУТРЬ портала (высоко)
+            
+            # Обновляем центр арены на точку спавна
+            self.arena_center = self.spawn_pos.copy()
+            
+            # Телепортируем босса в точку ПОРТАЛА (ВВЕРХ: Y - Offset)
             self.pos = pygame.math.Vector2(self.spawn_pos.x, self.spawn_pos.y - self.portal_offset_y)
-            self.current_alpha = 0 # Скрыта
+            self.current_alpha = 0
 
     def get_speed_factor(self):
         if self.state == self.STATE_CHAOS_BARRAGE:
@@ -234,45 +241,44 @@ class ArchangelBoss(pygame.sprite.Sprite):
         if self.state == self.STATE_INTRO:
             self.state_timer += 1
             
-            # А. Открытие портала
+            # 1. Портал открывается
             if self.state_timer < self.INTRO_PORTAL_OPEN_TIME:
                 self.intro_portal_progress = self.state_timer / self.INTRO_PORTAL_OPEN_TIME
                 self.current_alpha = 0
                 self.shake_func(1)
                 
-            # Б. Спуск босса
+            # 2. Спуск босса (ВНИЗ: от Y-300 до Y)
             elif self.state_timer < self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME:
                 self.intro_portal_progress = 1.0
                 descend_progress = (self.state_timer - self.INTRO_PORTAL_OPEN_TIME) / self.INTRO_DESCEND_TIME
-                
-                # Плавный спуск (Ease Out Cubic - быстро вылетает, плавно тормозит)
                 t = descend_progress
                 ease = 1 - pow(1 - t, 3)
                 
-                start_y = self.spawn_pos.y - self.portal_offset_y
+                # Точка старта (Верх)
+                start_y = self.spawn_pos.y - self.portal_offset_y-400
+                # Точка финиша (Центр)
                 end_y = self.spawn_pos.y
                 
+                # Движение: Start -> End (Увеличение Y = Спуск вниз)
                 self.pos.y = start_y + (end_y - start_y) * ease
                 
-                # Прозрачность: Проявляется быстрее, чем долетает
                 alpha_progress = min(1.0, descend_progress * 2.0)
                 self.current_alpha = int(255 * alpha_progress)
-                
                 self.shake_func(2)
-
-            # В. Закрытие портала
+                
+            # 3. Портал закрывается
             elif self.state_timer < self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME + self.INTRO_PORTAL_CLOSE_TIME:
                 self.current_alpha = 255
+                self.pos.y = self.spawn_pos.y # Фиксируем ровно в центре
                 close_t = (self.state_timer - (self.INTRO_PORTAL_OPEN_TIME + self.INTRO_DESCEND_TIME)) / self.INTRO_PORTAL_CLOSE_TIME
                 self.intro_portal_progress = 1.0 - close_t
             
             else:
-                # Конец интро - НАЧАЛО БОЯ
                 self.state = self.STATE_HOVER
                 self.intro_portal_progress = 0.0
                 self.invulnerable = False
                 self.cooldown_timer = 60
-                enemies.add(self) # Теперь можно бить
+                enemies.add(self) 
                 self.shake_func(10)
             
             self.update_hitboxes()
@@ -331,6 +337,8 @@ class ArchangelBoss(pygame.sprite.Sprite):
             self.transition_pose_factor = 1.0
                 
         else:
+            if self.state == self.STATE_HOVER:
+                self.target_pos = self.arena_center.copy()
             target_speed = self.move_speed
             if self.is_phase_two: target_speed *= 0.2 
             if self.state == self.STATE_PHASE_TRANSITION:
@@ -533,12 +541,21 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def spawn_chaos_rifts(self):
         count = random.randint(5, 7)
-        spawned_positions = [] # Список для хранения позиций порталов в этой волне
+        spawned_positions = [] 
 
         for _ in range(count):
-            for _ in range(15): # Чуть больше попыток, так как условий стало больше
-                x = random.randint(50, WIDTH-50)
-                y = random.randint(50, HEIGHT-50)
+            for _ in range(15): 
+                # --- ЗАМЕНИТЬ ГЕНЕРАЦИЮ X/Y НА ЭТО ---
+                # Используем координаты относительно центра арены
+                min_x = int(self.arena_center.x - 900)
+                max_x = int(self.arena_center.x + 900)
+                min_y = int(self.arena_center.y - 900)
+                max_y = int(self.arena_center.y + 900)
+                
+                x = random.randint(min_x, max_x)
+                y = random.randint(min_y, max_y)
+                # ---------------------------------------
+                
                 pos = pygame.math.Vector2(x, y)
                 
                 # 1. Проверка расстояния от БОССА (было раньше)
@@ -564,16 +581,23 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.set_state(self.STATE_PHASE_TWO_DASH)
         self.dash_start_pos = self.pos.copy()
         target_x, target_y = self.pos.x, self.pos.y
+        
         for _ in range(15):
             angle = random.uniform(0, math.pi * 2)
-            # Увеличенная дистанция поиска цели
             dist = random.uniform(420, self.MOVEMENT_RADIUS) 
             offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
-            candidate_x = max(100, min(WIDTH - 100, self.arena_center.x + offset.x))
-            candidate_y = max(100, min(HEIGHT - 100, self.arena_center.y + offset.y))
+            
+            # --- ЗАМЕНИТЬ РАСЧЕТ candidate_x/y НА ЭТО ---
+            cx, cy = self.arena_center.x, self.arena_center.y
+            # Ограничиваем точкой спавна +/- 900 пикселей
+            candidate_x = max(cx - 900, min(cx + 900, cx + offset.x))
+            candidate_y = max(cy - 900, min(cy + 900, cy + offset.y))
+            # ---------------------------------------------
+
             if abs(candidate_x - self.pos.x) >= 260 and abs(candidate_y - self.pos.y) >= 260:
                 target_x, target_y = candidate_x, candidate_y
                 break
+        
         self.target_pos = pygame.math.Vector2(target_x, target_y)
         self.shake_func(5)
 

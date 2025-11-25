@@ -137,7 +137,9 @@ class ChaosMagicProjectile(pygame.sprite.Sprite):
         self.pos += self.vel * (dt * 60)
         self.rect.center = self.pos
         
-        if not (-100 < self.pos.x < 2000 and -100 < self.pos.y < 1500):
+        # БЫЛО: if not (-100 < self.pos.x < 2000 and -100 < self.pos.y < 1500):
+        # СТАЛО: Расширяем границы, чтобы покрыть всю комнату (например, до 2500 по Y)
+        if not (-200 < self.pos.x < 2200 and -200 < self.pos.y < 2500):
             self.kill()
             
         for sprite in all_sprites:

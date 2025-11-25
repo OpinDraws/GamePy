@@ -35,7 +35,7 @@ def main():
     start_scene = MenuScene(scene_manager)
     scene_manager.switch_to(start_scene)
 
-    # 5. Главный игровой цикл
+    # 5. Главный игровой циклы
     running = True
     while running:
         # Расчет дельты времени (в секундах) для независимости физики от FPS

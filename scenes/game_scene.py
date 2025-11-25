@@ -1,20 +1,20 @@
+# scenes/game_scene.py
+
 import pygame
 import sys
 
-# Импорты ядра
 from core.config import *
 from core.scene_manager import Scene
 from core.asset_manager import AssetManager
 from core.camera import Camera
 from core.save_manager import SaveManager, get_default_save_data
 
-# Импорты мира и сущностей
 from world.tile_map import Map, Tile 
 from world.world_manager import WorldManager 
 from entities.player import Player
 from entities.bosses.archangel_boss import ArchangelBoss
+from entities.gate import Gate
 
-# Импорты графики и эффектов
 from systems.vfx import ScreenShake
 from rendering.background import generate_cave_background
 from rendering.ui_render import (
@@ -26,9 +26,6 @@ from rendering.ui_render import (
 from rendering.archangel_render import draw_archangel_boss
 from rendering.portal_render import draw_divine_portal
 
-# УБРАЛИ ВЕРХНИЕ ИМПОРТЫ СЦЕН
-
-# Вспомогательная функция коллизий
 def complex_collision_check(sprite_a, sprite_b):
     def intersect(h1, h2):
         def get_shape(h):
@@ -79,20 +76,16 @@ class GameScene(Scene):
         
         self.screen_shake = ScreenShake()
         
-        # 1. ЗАГРУЗКА ДАННЫХ СОХРАНЕНИЯ
         self.save_data = SaveManager.load_game()
         if self.save_data is None:
             self.save_data = get_default_save_data()
             print("Загружены данные по умолчанию")
         
-        # Извлекаем данные
         start_pos = self.save_data["spawn_pos"]
         current_room = self.save_data["current_room"]
         
-        # 2. КАМЕРА
-        self.camera = Camera(2400, 1600) 
+        self.camera = Camera(2000, 3200) 
 
-        # 3. ИГРОК
         self.player = Player(
             start_pos, 
             all_sprites, 
@@ -104,7 +97,6 @@ class GameScene(Scene):
         self.player.hp = self.save_data["hp"]
         self.player.max_hp = self.save_data["max_hp"]
         
-        # 4. МЕНЕДЖЕР МИРА
         self.world_manager = WorldManager(
             self.player,
             self.camera,
@@ -112,15 +104,10 @@ class GameScene(Scene):
             complex_collision_check 
         )
 
-        # 5. ЗАГРУЗКА КОМНАТЫ
         self.world_manager.load_room(current_room, start_pos) 
         
-        # 6. БОСС
-        boss_x = self.world_manager.map_instance.width / 2
-        boss_y = 5 * TILE_SIZE 
-        
-        self.boss = ArchangelBoss(boss_x, boss_y, self.player)
-        self.boss.set_state(self.boss.STATE_INTRO) 
+        self.boss = ArchangelBoss(-1000, -1000, self.player)
+        self.boss.set_state(self.boss.STATE_HIDDEN) 
         self.boss.invulnerable = True
         
         self.auto_spawn_timer = -1 
@@ -132,10 +119,9 @@ class GameScene(Scene):
 
     def enter(self):
         print("Сцена игры: Старт")
-        self.assets.play_music()
+        # Музыка теперь запускается в update
         
     def on_player_death(self):
-        """Вызывается игроком при смерти."""
         if not self.game_over:
             print("Игрок мертв. Запускаем Game Over таймер.")
             self.game_over = True
@@ -156,7 +142,6 @@ class GameScene(Scene):
 
                 if event.key == pygame.K_ESCAPE:
                     print("GameScene: Выход в меню")
-                    # ЛОКАЛЬНЫЙ ИМПОРТ
                     from scenes.menu_scene import MenuScene
                     menu_scene = MenuScene(self.manager)
                     self.manager.switch_to(menu_scene)
@@ -165,7 +150,6 @@ class GameScene(Scene):
         if self.game_over:
             self.death_timer -= 1
             if self.death_timer <= 0:
-                # ЛОКАЛЬНЫЙ ИМПОРТ
                 from scenes.game_over_scene import GameOverScene
                 self.manager.switch_to(GameOverScene(self.manager))
             
@@ -188,6 +172,30 @@ class GameScene(Scene):
         self.camera.update(self.player.rect)
         self.screen_shake.update(dt)
         self.check_collisions()
+
+        # --- ЛОГИКА ТРИГГЕРОВ (Обновленные координаты) ---
+        
+        # 1. Ворота (Y ~ 2000)
+        GATE_TRIGGER_Y = 2200 # Открываем, когда подходим снизу
+        if self.player.pos.y < GATE_TRIGGER_Y:
+            for gate in self.world_manager.gates:
+                gate.open()
+
+        # 2. Босс (Y ~ 2000 - вход)
+        BOSS_TRIGGER_Y = 1500 
+        
+        if self.boss.state == self.boss.STATE_HIDDEN and self.player.pos.y < BOSS_TRIGGER_Y:
+            print("Триггер босса сработал!")
+            
+            # --- ВАЖНО: Устанавливаем точку назначения ---
+            # Было (1000, 1000) - это слишком низко.
+            # Ставим (1000, 600) - это выше по экрану (меньше Y).
+            # Босс появится еще выше (в портале) и спустится сюда.
+            self.boss.spawn_pos = pygame.math.Vector2(1000, 1000)
+            
+            # Запускаем интро
+            self.boss.spawn_boss()
+            self.assets.play_music()
 
     def check_collisions(self):
         hits = pygame.sprite.groupcollide(enemies, bullets, False, True, complex_collision_check)
@@ -213,14 +221,15 @@ class GameScene(Scene):
         screen.blit(self.cave_bg, (total_offset.x - 20, total_offset.y - 20))
         self.world_manager.draw_map(screen, total_offset)
         
-        is_boss_intro = self.boss.state == self.boss.STATE_INTRO
-        if is_boss_intro:
+        # Рисуем портал
+        if self.boss.state == self.boss.STATE_INTRO:
             portal_pos = self.boss.spawn_pos + total_offset
-            portal_draw_pos = (portal_pos.x, portal_pos.y - 400)
+            # Портал рисуется выше целевой точки
+            portal_draw_pos = (portal_pos.x, portal_pos.y - self.boss.portal_offset_y)
             draw_divine_portal(screen, portal_draw_pos, self.boss.intro_portal_progress, self.boss.time_ticks)
         
         for sprite in all_sprites:
-            if sprite != self.boss and not isinstance(sprite, Tile): 
+            if sprite != self.boss and not isinstance(sprite, Tile) and not isinstance(sprite, Gate): 
                 screen.blit(sprite.image, sprite.rect.topleft + total_offset)
         
         if self.boss.alive() and self.boss.state != self.boss.STATE_HIDDEN: 
@@ -253,14 +262,13 @@ class GameScene(Scene):
                 death_params=death_data
             )
             
-            if self.boss.state != self.boss.STATE_HIDDEN:
-                 draw_boss_hud_new(
-                     screen, 
-                     self.boss, 
-                     self.assets.get_boss_icon(), 
-                     self.assets.get_font_boss_name(), 
-                     self.assets.get_font_boss_title()
-                 )
+            draw_boss_hud_new(
+                screen, 
+                self.boss, 
+                self.assets.get_boss_icon(), 
+                self.assets.get_font_boss_name(), 
+                self.assets.get_font_boss_title()
+            )
 
         self.player.skill_manager.draw(screen, total_offset)
         
@@ -273,9 +281,8 @@ class GameScene(Scene):
         
         skill_x = 20
         skill_y = 20 + 80 + 10 
-        icon_size = 50
         draw_skill_icon(screen, self.player.skill_manager.skills['flurry'], (skill_x, skill_y), self.assets.get_font_ui())
-        draw_dash_icon(screen, self.player, (skill_x + icon_size + 10, skill_y), self.assets.get_font_ui())
+        draw_dash_icon(screen, self.player, (skill_x + 60, skill_y), self.assets.get_font_ui())
         
         for sprite in particles:
             if hasattr(sprite, 'draw_custom'):
