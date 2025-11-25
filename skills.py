@@ -26,11 +26,13 @@ class SlashFlurry:
         self.owner = owner
         
         self.cooldown = 2000     
-        # ИЗМЕНЕНИЕ: Вернули 400 мс (было 150).
-        # Теперь анимация плавная, и хитбокс активен ровно столько же времени.
         self.duration = 400      
         self.damage = 150         
-        self.radius = 140         
+        
+        # --- НАСТРОЙКИ РАДИУСА ---
+        self.radius = 140         # Радиус ВИЗУАЛА (оставляем, чтобы картинка не ломалась)
+        # Увеличиваем хитбокс, так как визуальные эффекты летят дальше радиуса (до 1.5x)
+        self.hitbox_radius = 220  # Радиус ПОПАДАНИЯ (был 140, теперь больше)
         
         self.timer = -2000       
         self.active_timer = 0    
@@ -54,7 +56,6 @@ class SlashFlurry:
 
         self.active_timer += dt * 1000
         
-        # Хитбокс исчезает РОВНО тогда, когда заканчивается время анимации (400мс)
         if self.active_timer >= self.duration:
             self.is_active = False
             return
@@ -62,7 +63,7 @@ class SlashFlurry:
         rad = math.radians(self.cast_angle)
         direction = pygame.math.Vector2(math.cos(rad), math.sin(rad))
         
-        # Позиционирование хитбокса (синхронизировано с отрисовкой)
+        # Позиционирование хитбокса
         base_pos = self.owner.pos
         shoulder_height = pygame.math.Vector2(0, -50)
         forward_offset = direction * 60 
@@ -73,7 +74,9 @@ class SlashFlurry:
             if enemy in self.hit_enemies: continue
             
             dist = (enemy.pos - attack_center).length()
-            if dist < self.radius:
+            
+            # *** ИСПОЛЬЗУЕМ УВЕЛИЧЕННЫЙ РАДИУС ДЛЯ ПРОВЕРКИ ***
+            if dist < self.hitbox_radius:
                 enemy.take_damage(self.damage)
                 self.hit_enemies.add(enemy)
                 push_dir = (enemy.pos - self.owner.pos).normalize()
@@ -83,7 +86,6 @@ class SlashFlurry:
         if self.is_active:
             progress = self.active_timer / self.duration
             
-            # Позиционирование визуального эффекта (идентично хитбоксу)
             world_pos = self.owner.pos
             shoulder_height = pygame.math.Vector2(0, -50)
             
@@ -93,4 +95,5 @@ class SlashFlurry:
             
             final_draw_pos = world_pos + shoulder_height + forward_offset + camera_offset
             
+            # Для отрисовки используем старый radius, чтобы анимация оставалась красивой
             draw_slash_flurry(surface, final_draw_pos, self.cast_angle, progress, self.radius)
