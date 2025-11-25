@@ -1,15 +1,17 @@
 import pygame
-import random
-import sys # Нужно для выхода по ESC
+import sys
 
 # Импорты ядра
 from core.config import *
 from core.scene_manager import Scene
 from core.asset_manager import AssetManager
+from core.camera import Camera
 
-# Импорты сущностей (пока они в корне)
+# Импорты мира и сущностей
+from world.tile_map import Map
 from player import Player
-from enemy import Enemy
+# Не забудь поменять импорт на правильный, если переносил файл
+# from entities.tentacle_enemy import TentacleEnemy (если будем спавнить врагов)
 from entities.archangel_boss import ArchangelBoss
 
 # Импорты графики и эффектов
@@ -24,40 +26,27 @@ from rendering.ui_render import (
 from rendering.archangel_render import draw_archangel_boss
 from rendering.portal_render import draw_divine_portal
 
-# --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ КОЛЛИЗИЙ ---
+# Вспомогательная функция коллизий (оставляем как есть)
 def complex_collision_check(sprite_a, sprite_b):
-    """
-    Универсальная проверка коллизий (Hitbox vs Hitbox).
-    """
     def intersect(h1, h2):
         def get_shape(h):
             if isinstance(h, pygame.Rect): return ('rect', h)
             return ('circle', h)
-
         t1, d1 = get_shape(h1)
         t2, d2 = get_shape(h2)
-
-        if t1 == 'rect' and t2 == 'rect':
-            return d1.colliderect(d2)
+        if t1 == 'rect' and t2 == 'rect': return d1.colliderect(d2)
         elif t1 == 'circle' and t2 == 'circle':
-            dx = d1['center'][0] - d2['center'][0]
-            dy = d1['center'][1] - d2['center'][1]
-            r = d1['radius'] + d2['radius']
-            return (dx**2 + dy**2) < (r**2)
+            return (d1['center'][0]-d2['center'][0])**2 + (d1['center'][1]-d2['center'][1])**2 < (d1['radius']+d2['radius'])**2
         else:
             rect = d1 if t1 == 'rect' else d2
             circ = d1 if t1 == 'circle' else d2
             cx, cy = circ['center']
-            r = circ['radius']
             closest_x = max(rect.left, min(cx, rect.right))
             closest_y = max(rect.top, min(cy, rect.bottom))
-            dx = cx - closest_x
-            dy = cy - closest_y
-            return (dx**2 + dy**2) < (r**2)
+            return (cx-closest_x)**2 + (cy-closest_y)**2 < circ['radius']**2
 
     has_a = hasattr(sprite_a, 'hitboxes') and sprite_a.hitboxes
     has_b = hasattr(sprite_b, 'hitboxes') and sprite_b.hitboxes
-
     if has_a and has_b:
         for ha in sprite_a.hitboxes:
             for hb in sprite_b.hitboxes:
@@ -71,19 +60,16 @@ def complex_collision_check(sprite_a, sprite_b):
         for hb in sprite_b.hitboxes:
             if intersect(sprite_a.rect, hb): return True
         return False
-
     return pygame.sprite.collide_circle(sprite_a, sprite_b)
 
 
 class GameScene(Scene):
     def __init__(self, manager):
         super().__init__(manager)
-        self.assets = AssetManager() # Получаем доступ к ресурсам
+        self.assets = AssetManager()
         
-        # --- Инициализация игрового мира ---
-        print("Сцена игры: Инициализация...")
+        print("Сцена игры: Инициализация мира...")
         
-        # Очищаем группы спрайтов перед началом
         all_sprites.empty()
         bullets.empty()
         enemies.empty()
@@ -91,68 +77,83 @@ class GameScene(Scene):
         
         self.screen_shake = ScreenShake()
         
-        # Создаем игрока
+        # 1. ГЕНЕРАЦИЯ КАРТЫ
+        # Создаем большую "комнату" (60x40 тайлов = 2400x1600 пикселей)
+        map_layout = []
+        cols = 60 
+        rows = 40
+        
+        # Верхняя стена
+        map_layout.append('#' * cols)
+        # Середина (пустота со стенами по бокам)
+        for _ in range(rows - 2):
+            map_layout.append('#' + '.' * (cols - 2) + '#')
+        # Нижняя стена
+        map_layout.append('#' * cols)
+
+        self.map = Map(map_layout)
+        
+        # 2. КАМЕРА
+        self.camera = Camera(self.map.width, self.map.height)
+
+        # 3. ИГРОК
+        # Спавним игрока в центре карты
+        start_pos = (self.map.width / 2, self.map.height / 2)
         self.player = Player(
-            (WIDTH/2, HEIGHT/2), 
+            start_pos, 
             all_sprites, 
-            None, 
+            self.map.obstacles, # ВАЖНО: Передаем группу стен игроку
             [all_sprites, particles],
             self.screen_shake.shake
         )
         
-        # Создаем босса
-        self.boss = ArchangelBoss(WIDTH/2, HEIGHT/2, self.player)
+        # 4. БОСС
+        # Босс тоже спавнится относительно центра карты
+        self.boss = ArchangelBoss(self.map.width / 2, self.map.height / 2, self.player)
         
-        # Генерация фона
+        # Фон пещеры
         self.cave_bg = generate_cave_background()
-        
-        self.auto_spawn_timer = 120 
+        self.auto_spawn_timer = 60 
 
     def enter(self):
-        """Вызывается при входе в сцену."""
         print("Сцена игры: Старт")
         self.assets.play_music()
 
     def handle_input(self, events):
-        """Обработка событий (нажатия кнопок, которые не обрабатывает игрок)."""
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_p:
                      self.boss.spawn_boss()
-                # В будущем здесь можно сделать паузу вместо выхода
                 if event.key == pygame.K_ESCAPE:
                     pygame.quit()
                     sys.exit()
 
     def update(self, dt):
-        """Обновление логики игры."""
-        # Автоспавн босса (таймер)
+        # Автоспавн босса
         if self.auto_spawn_timer > 0:
             self.auto_spawn_timer -= 1
             if self.auto_spawn_timer == 0:
                 self.boss.spawn_boss()
-                self.assets.play_music() # На всякий случай убеждаемся, что музыка играет
+                self.assets.play_music()
 
-        # Обновление игрока
         self.player.update_custom(dt, enemies, bullets, all_sprites)
         
-        # Обновление остальных спрайтов
         for sprite in all_sprites:
             if sprite != self.player:
                 sprite.update(dt)
         
-        # Проверка коллизий
+        # ВАЖНО: Обновляем камеру, чтобы она следила за игроком
+        self.camera.update(self.player.rect)
+        
         self.check_collisions()
 
     def check_collisions(self):
-        # Попадание пуль во врагов
         hits = pygame.sprite.groupcollide(enemies, bullets, False, True, complex_collision_check)
         for enemy, bullet_list in hits.items():
             for bullet in bullet_list:
                 bullet.create_impact_vfx()
                 enemy.take_damage(bullet.damage)
         
-        # Столкновение врагов с игроком
         enemies_hitting_player = pygame.sprite.spritecollide(
             self.player, 
             enemies, 
@@ -164,34 +165,35 @@ class GameScene(Scene):
                 self.screen_shake.shake(10)
 
     def draw(self, screen):
-        """Отрисовка всего."""
-        shake_offset = self.screen_shake.get_offset()
+        # Получаем смещение от тряски
+        shake = self.screen_shake.get_offset()
+        # Итоговое смещение = Камера + Тряска
+        total_offset = self.camera.offset + shake
         
-        # 1. Фон
-        self.draw_grid(screen, shake_offset)
-        bg_x = -20 + shake_offset.x
-        bg_y = -20 + shake_offset.y
-        screen.blit(self.cave_bg, (bg_x, bg_y))
+        # 1. Фон (рисуем с небольшим параллаксом или просто со смещением)
+        screen.blit(self.cave_bg, (total_offset.x - 20, total_offset.y - 20))
         
-        # 2. Портал (если нужен)
+        # 2. Стены карты
+        for tile in self.map.all_map_sprites:
+            screen.blit(tile.image, tile.rect.topleft + total_offset)
+        
+        # 3. Портал Интро
         is_boss_intro = self.boss.state == self.boss.STATE_INTRO
         if is_boss_intro:
-            portal_center = (self.boss.spawn_pos.x + shake_offset.x, (self.boss.spawn_pos.y - 400) + shake_offset.y)
-            draw_divine_portal(screen, portal_center, self.boss.intro_portal_progress, self.boss.time_ticks)
+            portal_pos = self.boss.spawn_pos + total_offset
+            # Смещаем портал выше точки спавна
+            portal_draw_pos = (portal_pos.x, portal_pos.y - 400)
+            draw_divine_portal(screen, portal_draw_pos, self.boss.intro_portal_progress, self.boss.time_ticks)
         
-        # 3. Спрайты (кроме босса, он рисуется отдельно для красоты)
+        # 4. Спрайты (Игрок, снаряды, враги)
+        # Рисуем все спрайты со смещением камеры!
         for sprite in all_sprites:
-            if sprite != self.boss: 
-                draw_pos = sprite.rect.topleft + shake_offset
-                screen.blit(sprite.image, draw_pos)
+            if sprite != self.boss: # Босс рисуется отдельно через спец функцию
+                screen.blit(sprite.image, sprite.rect.topleft + total_offset)
         
-        # 4. Босс (Специальная отрисовка)
+        # 5. Босс (Специальная отрисовка)
         if self.boss.alive() and (self.boss.is_active or is_boss_intro):
-            # Собираем параметры для рендера
-            mist_active = self.boss.vfx_mist_active
-            mist_timer_val = self.boss.state_timer if self.boss.state == self.boss.STATE_MIST_EFFECT else 0
-            target_pos_val = self.boss.fixed_target_pos if self.boss.state == self.boss.STATE_MIST_EFFECT else self.player.pos
-            
+            # Собираем параметры смерти
             death_data = {
                 'pose_factor': getattr(self.boss, 'death_pose_factor', 0.0),
                 'item_alpha': getattr(self.boss, 'death_item_alpha', 255),
@@ -203,12 +205,12 @@ class GameScene(Scene):
             
             draw_archangel_boss(
                 screen, 
-                self.boss.pos + shake_offset, 
+                self.boss.pos + total_offset,  # ВАЖНО: Позиция + Камера
                 self.boss.time_ticks, 
                 self.boss.spear_animation_progress,
-                mist_active, 
-                mist_timer_val,
-                target_pos_val,
+                self.boss.vfx_mist_active, 
+                self.boss.state_timer if self.boss.state == self.boss.STATE_MIST_EFFECT else 0,
+                self.boss.fixed_target_pos if self.boss.state == self.boss.STATE_MIST_EFFECT else self.player.pos,
                 self.boss.smite_vfx_progress,
                 self.boss.shield_animation_progress,
                 self.boss.is_phase_two,
@@ -221,7 +223,7 @@ class GameScene(Scene):
                 death_params=death_data
             )
             
-            # HUD Босса
+            # HUD Босса (Рисуется поверх всего, БЕЗ смещения камеры)
             if self.boss.state != self.boss.STATE_HIDDEN:
                  draw_boss_hud_new(
                      screen, 
@@ -231,8 +233,8 @@ class GameScene(Scene):
                      self.assets.get_font_boss_title()
                  )
 
-        # 5. VFX и Интерфейс Игрока
-        self.player.skill_manager.draw(screen, shake_offset)
+        # 6. VFX и UI Игрока (Поверх всего)
+        self.player.skill_manager.draw(screen, total_offset)
         
         draw_player_hud(
             screen, 
@@ -241,34 +243,14 @@ class GameScene(Scene):
             self.assets.get_font_boss_title()
         )
         
-        # Иконки скиллов
+        # Иконки
         skill_x = 20
         skill_y = 20 + 80 + 10 
         icon_size = 50
-        icon_padding = 10
+        draw_skill_icon(screen, self.player.skill_manager.skills['flurry'], (skill_x, skill_y), self.assets.get_font_ui())
+        draw_dash_icon(screen, self.player, (skill_x + icon_size + 10, skill_y), self.assets.get_font_ui())
         
-        draw_skill_icon(
-            screen, 
-            self.player.skill_manager.skills['flurry'], 
-            (skill_x, skill_y), 
-            self.assets.get_font_ui()
-        )
-        draw_dash_icon(
-            screen,
-            self.player,
-            (skill_x + icon_size + icon_padding, skill_y),
-            self.assets.get_font_ui()
-        )
-        
-        # Частицы (отрисовка кастомная)
+        # Частицы
         for sprite in particles:
             if hasattr(sprite, 'draw_custom'):
-                sprite.draw_custom(screen, shake_offset)
-
-    def draw_grid(self, screen, offset):
-        start_x = int(-offset.x) % TILE_SIZE
-        start_y = int(-offset.y) % TILE_SIZE
-        for x in range(start_x, WIDTH, TILE_SIZE):
-            pygame.draw.line(screen, COLOR_GRID, (x, 0), (x, HEIGHT))
-        for y in range(start_y, HEIGHT, TILE_SIZE):
-            pygame.draw.line(screen, COLOR_GRID, (0, y), (WIDTH, y))
+                sprite.draw_custom(screen, total_offset)
