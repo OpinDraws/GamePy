@@ -1,6 +1,6 @@
 import pygame
 from core.config import enemies, COLOR_MONSTER_BODY
-from vfx import Particle
+from systems.vfx import Particle
 
 class BaseEnemy(pygame.sprite.Sprite):
     """

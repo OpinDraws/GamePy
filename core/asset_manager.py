@@ -106,3 +106,8 @@ class AssetManager:
     def play_music(self):
         if self.music_loaded and not pygame.mixer.music.get_busy():
             pygame.mixer.music.play(loops=-1, fade_ms=4000)
+
+    # --- ДОБАВЛЕННЫЙ МЕТОД ---
+    def stop_music(self):
+        if self.music_loaded:
+            pygame.mixer.music.fadeout(1000) # Затухание за 1 секунду

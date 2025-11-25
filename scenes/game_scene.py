@@ -6,16 +6,16 @@ from core.config import *
 from core.scene_manager import Scene
 from core.asset_manager import AssetManager
 from core.camera import Camera
+from core.save_manager import SaveManager, get_default_save_data
 
 # Импорты мира и сущностей
-from world.tile_map import Map
-from player import Player
-# Не забудь поменять импорт на правильный, если переносил файл
-# from entities.tentacle_enemy import TentacleEnemy (если будем спавнить врагов)
-from entities.archangel_boss import ArchangelBoss
+from world.tile_map import Map, Tile 
+from world.world_manager import WorldManager 
+from entities.player import Player
+from entities.bosses.archangel_boss import ArchangelBoss
 
 # Импорты графики и эффектов
-from vfx import ScreenShake
+from systems.vfx import ScreenShake
 from rendering.background import generate_cave_background
 from rendering.ui_render import (
     draw_boss_hud_new, 
@@ -26,7 +26,9 @@ from rendering.ui_render import (
 from rendering.archangel_render import draw_archangel_boss
 from rendering.portal_render import draw_divine_portal
 
-# Вспомогательная функция коллизий (оставляем как есть)
+# УБРАЛИ ВЕРХНИЕ ИМПОРТЫ СЦЕН
+
+# Вспомогательная функция коллизий
 def complex_collision_check(sprite_a, sprite_b):
     def intersect(h1, h2):
         def get_shape(h):
@@ -77,74 +79,114 @@ class GameScene(Scene):
         
         self.screen_shake = ScreenShake()
         
-        # 1. ГЕНЕРАЦИЯ КАРТЫ
-        # Создаем большую "комнату" (60x40 тайлов = 2400x1600 пикселей)
-        map_layout = []
-        cols = 60 
-        rows = 40
+        # 1. ЗАГРУЗКА ДАННЫХ СОХРАНЕНИЯ
+        self.save_data = SaveManager.load_game()
+        if self.save_data is None:
+            self.save_data = get_default_save_data()
+            print("Загружены данные по умолчанию")
         
-        # Верхняя стена
-        map_layout.append('#' * cols)
-        # Середина (пустота со стенами по бокам)
-        for _ in range(rows - 2):
-            map_layout.append('#' + '.' * (cols - 2) + '#')
-        # Нижняя стена
-        map_layout.append('#' * cols)
-
-        self.map = Map(map_layout)
+        # Извлекаем данные
+        start_pos = self.save_data["spawn_pos"]
+        current_room = self.save_data["current_room"]
         
         # 2. КАМЕРА
-        self.camera = Camera(self.map.width, self.map.height)
+        self.camera = Camera(2400, 1600) 
 
         # 3. ИГРОК
-        # Спавним игрока в центре карты
-        start_pos = (self.map.width / 2, self.map.height / 2)
         self.player = Player(
             start_pos, 
             all_sprites, 
-            self.map.obstacles, # ВАЖНО: Передаем группу стен игроку
+            None, 
             [all_sprites, particles],
-            self.screen_shake.shake
+            self.screen_shake.shake,
+            self.on_player_death 
         )
+        self.player.hp = self.save_data["hp"]
+        self.player.max_hp = self.save_data["max_hp"]
         
-        # 4. БОСС
-        # Босс тоже спавнится относительно центра карты
-        self.boss = ArchangelBoss(self.map.width / 2, self.map.height / 2, self.player)
+        # 4. МЕНЕДЖЕР МИРА
+        self.world_manager = WorldManager(
+            self.player,
+            self.camera,
+            self.screen_shake.shake,
+            complex_collision_check 
+        )
+
+        # 5. ЗАГРУЗКА КОМНАТЫ
+        self.world_manager.load_room(current_room, start_pos) 
         
-        # Фон пещеры
+        # 6. БОСС
+        boss_x = self.world_manager.map_instance.width / 2
+        boss_y = 5 * TILE_SIZE 
+        
+        self.boss = ArchangelBoss(boss_x, boss_y, self.player)
+        self.boss.set_state(self.boss.STATE_INTRO) 
+        self.boss.invulnerable = True
+        
+        self.auto_spawn_timer = -1 
+        self.game_over = False
+        self.death_timer = 0
+        
         self.cave_bg = generate_cave_background()
-        self.auto_spawn_timer = 60 
+
 
     def enter(self):
         print("Сцена игры: Старт")
         self.assets.play_music()
+        
+    def on_player_death(self):
+        """Вызывается игроком при смерти."""
+        if not self.game_over:
+            print("Игрок мертв. Запускаем Game Over таймер.")
+            self.game_over = True
+            self.death_timer = 60 
 
     def handle_input(self, events):
+        if self.game_over: return 
+        
         for event in events:
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_p:
-                     self.boss.spawn_boss()
+                if event.key == pygame.K_F5:
+                    player_data = self.player.get_save_data()
+                    world_data = {
+                        "current_room": self.world_manager.current_room,
+                        "spawn_pos": [self.player.pos.x, self.player.pos.y] 
+                    }
+                    SaveManager.save_game(player_data, world_data)
+
                 if event.key == pygame.K_ESCAPE:
-                    pygame.quit()
-                    sys.exit()
+                    print("GameScene: Выход в меню")
+                    # ЛОКАЛЬНЫЙ ИМПОРТ
+                    from scenes.menu_scene import MenuScene
+                    menu_scene = MenuScene(self.manager)
+                    self.manager.switch_to(menu_scene)
 
     def update(self, dt):
-        # Автоспавн босса
-        if self.auto_spawn_timer > 0:
-            self.auto_spawn_timer -= 1
-            if self.auto_spawn_timer == 0:
-                self.boss.spawn_boss()
-                self.assets.play_music()
+        if self.game_over:
+            self.death_timer -= 1
+            if self.death_timer <= 0:
+                # ЛОКАЛЬНЫЙ ИМПОРТ
+                from scenes.game_over_scene import GameOverScene
+                self.manager.switch_to(GameOverScene(self.manager))
+            
+            for sprite in all_sprites:
+                if sprite != self.player:
+                    sprite.update(dt)
+            for sprite in particles:
+                sprite.update(dt)
 
-        self.player.update_custom(dt, enemies, bullets, all_sprites)
+            self.screen_shake.update(dt)
+            return 
+
+        self.world_manager.update(dt) 
+        self.player.update_custom(dt, enemies, bullets, all_sprites, self.camera.offset) 
         
         for sprite in all_sprites:
             if sprite != self.player:
                 sprite.update(dt)
         
-        # ВАЖНО: Обновляем камеру, чтобы она следила за игроком
         self.camera.update(self.player.rect)
-        
+        self.screen_shake.update(dt)
         self.check_collisions()
 
     def check_collisions(self):
@@ -165,35 +207,23 @@ class GameScene(Scene):
                 self.screen_shake.shake(10)
 
     def draw(self, screen):
-        # Получаем смещение от тряски
         shake = self.screen_shake.get_offset()
-        # Итоговое смещение = Камера + Тряска
         total_offset = self.camera.offset + shake
         
-        # 1. Фон (рисуем с небольшим параллаксом или просто со смещением)
         screen.blit(self.cave_bg, (total_offset.x - 20, total_offset.y - 20))
+        self.world_manager.draw_map(screen, total_offset)
         
-        # 2. Стены карты
-        for tile in self.map.all_map_sprites:
-            screen.blit(tile.image, tile.rect.topleft + total_offset)
-        
-        # 3. Портал Интро
         is_boss_intro = self.boss.state == self.boss.STATE_INTRO
         if is_boss_intro:
             portal_pos = self.boss.spawn_pos + total_offset
-            # Смещаем портал выше точки спавна
             portal_draw_pos = (portal_pos.x, portal_pos.y - 400)
             draw_divine_portal(screen, portal_draw_pos, self.boss.intro_portal_progress, self.boss.time_ticks)
         
-        # 4. Спрайты (Игрок, снаряды, враги)
-        # Рисуем все спрайты со смещением камеры!
         for sprite in all_sprites:
-            if sprite != self.boss: # Босс рисуется отдельно через спец функцию
+            if sprite != self.boss and not isinstance(sprite, Tile): 
                 screen.blit(sprite.image, sprite.rect.topleft + total_offset)
         
-        # 5. Босс (Специальная отрисовка)
-        if self.boss.alive() and (self.boss.is_active or is_boss_intro):
-            # Собираем параметры смерти
+        if self.boss.alive() and self.boss.state != self.boss.STATE_HIDDEN: 
             death_data = {
                 'pose_factor': getattr(self.boss, 'death_pose_factor', 0.0),
                 'item_alpha': getattr(self.boss, 'death_item_alpha', 255),
@@ -205,7 +235,7 @@ class GameScene(Scene):
             
             draw_archangel_boss(
                 screen, 
-                self.boss.pos + total_offset,  # ВАЖНО: Позиция + Камера
+                self.boss.pos + total_offset, 
                 self.boss.time_ticks, 
                 self.boss.spear_animation_progress,
                 self.boss.vfx_mist_active, 
@@ -223,7 +253,6 @@ class GameScene(Scene):
                 death_params=death_data
             )
             
-            # HUD Босса (Рисуется поверх всего, БЕЗ смещения камеры)
             if self.boss.state != self.boss.STATE_HIDDEN:
                  draw_boss_hud_new(
                      screen, 
@@ -233,7 +262,6 @@ class GameScene(Scene):
                      self.assets.get_font_boss_title()
                  )
 
-        # 6. VFX и UI Игрока (Поверх всего)
         self.player.skill_manager.draw(screen, total_offset)
         
         draw_player_hud(
@@ -243,14 +271,12 @@ class GameScene(Scene):
             self.assets.get_font_boss_title()
         )
         
-        # Иконки
         skill_x = 20
         skill_y = 20 + 80 + 10 
         icon_size = 50
         draw_skill_icon(screen, self.player.skill_manager.skills['flurry'], (skill_x, skill_y), self.assets.get_font_ui())
         draw_dash_icon(screen, self.player, (skill_x + icon_size + 10, skill_y), self.assets.get_font_ui())
         
-        # Частицы
         for sprite in particles:
             if hasattr(sprite, 'draw_custom'):
                 sprite.draw_custom(screen, total_offset)
