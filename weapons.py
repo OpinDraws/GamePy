@@ -1,7 +1,7 @@
 import pygame
 import random
 import math
-from config import *
+from core.config import *
 from vfx import Particle
 
 class SlashProjectile(pygame.sprite.Sprite):

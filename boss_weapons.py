@@ -1,7 +1,7 @@
 import pygame
 import math
 import random
-from config import all_sprites, enemies 
+from core.config import all_sprites, enemies
 from rendering.archangel_render import draw_spear_projectile
 
 # --- ЦВЕТА ДЛЯ МАГИИ ---

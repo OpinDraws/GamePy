@@ -1,7 +1,7 @@
 import pygame
 import random
 import math
-from config import (
+from core.config import (
     all_sprites, particles, 
     COLOR_PARTICLE, COLOR_VAMPIRE_SKIN, 
     COLOR_VAMPIRE_CLOAK, COLOR_VAMPIRE_ACCENT, 

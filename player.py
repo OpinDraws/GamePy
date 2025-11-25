@@ -1,7 +1,7 @@
 import pygame
 import math
 import random 
-from config import *
+from core.config import *
 from vfx import Particle
 from weapons import SlashProjectile 
 import rendering

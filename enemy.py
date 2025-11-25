@@ -1,7 +1,7 @@
 import pygame
 import math
 import random
-from config import *
+from core.config import *
 from vfx import GraphicsGenerator, Particle
 from rendering import draw_eldritch_horror, get_bezier_points
 
