@@ -3,7 +3,7 @@
 import pygame
 import math
 import random
-from config import WIDTH, HEIGHT, all_sprites, enemies, FPS 
+from core.config import WIDTH, HEIGHT, all_sprites, enemies, FPS 
 from boss_weapons import AngelSpearProjectile 
 from rendering.archangel_render import draw_archangel_boss
 from vfx import GhostMistVFX, CelestialSmiteVFX, ShieldWaveVFX, ChaosRiftVFX

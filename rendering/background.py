@@ -1,7 +1,7 @@
 import pygame
 import random
 import math
-from config import WIDTH, HEIGHT
+from core.config import WIDTH, HEIGHT
 
 # --- ПАЛИТРА ПЕЩЕРЫ ---
 C_CAVE_FLOOR = (20, 15, 25)       # Основной цвет пола (темно-фиолетовый)
