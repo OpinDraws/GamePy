@@ -14,6 +14,7 @@ from world.world_manager import WorldManager
 from entities.player import Player
 from entities.bosses.archangel_boss import ArchangelBoss
 from entities.gate import Gate
+from entities.tentacle_enemy import TentacleEnemy
 
 from systems.vfx import ScreenShake
 from rendering.background import generate_cave_background
@@ -79,7 +80,6 @@ class GameScene(Scene):
         self.save_data = SaveManager.load_game()
         if self.save_data is None:
             self.save_data = get_default_save_data()
-            print("Загружены данные по умолчанию")
         
         start_pos = self.save_data["spawn_pos"]
         current_room = self.save_data["current_room"]
@@ -104,7 +104,39 @@ class GameScene(Scene):
             complex_collision_check 
         )
 
+        # 1. СНАЧАЛА ЗАГРУЖАЕМ КОМНАТУ (Это создает стены и очищает старых врагов)
         self.world_manager.load_room(current_room, start_pos) 
+        
+        # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ (Чтобы они добавились в чистую группу enemies)
+        
+        # Монстр 1 (Слева)
+        pos_m1 = self.player.pos + pygame.math.Vector2(-60, 50) # -60 чтобы не перекрывать игрока, если стоять вплотную
+        m1 = TentacleEnemy(
+            pos_m1, 
+            self.player, 
+            [all_sprites, enemies], # Теперь enemies не очистится после этого
+            [all_sprites, particles], 
+            self.screen_shake.shake
+        )
+        m1.health = 150
+        m1.base_speed = 0            
+        m1.attention_state = 'FOCUS' 
+        m1.attention_timer = -99999 
+
+        # Монстр 2 (Справа)
+        pos_m2 = self.player.pos + pygame.math.Vector2(60, 50)
+        m2 = TentacleEnemy(
+            pos_m2, 
+            self.player, 
+            [all_sprites, enemies], 
+            [all_sprites, particles], 
+            self.screen_shake.shake
+        )
+        m2.health = 150
+        m2.base_speed = 0
+        m2.attention_state = 'FOCUS'
+        m2.attention_timer = -99999
+        # --------------------------------------------
         
         self.boss = ArchangelBoss(-1000, -1000, self.player)
         self.boss.set_state(self.boss.STATE_HIDDEN) 
@@ -115,7 +147,6 @@ class GameScene(Scene):
         self.death_timer = 0
         
         self.cave_bg = generate_cave_background()
-
 
     def enter(self):
         print("Сцена игры: Старт")

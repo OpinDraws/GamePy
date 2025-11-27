@@ -10,8 +10,8 @@ def get_default_save_data():
         "hp": 100,
         "max_hp": 100,
         "current_room": "boss_arena",
-        # X=1000 (Центр), Y=2600 (Нижняя комната)
-        "spawn_pos": [1000, 2600], 
+        # ИЗМЕНЕНИЕ: Было 2600, стало 3100 (на 500 ниже)
+        "spawn_pos": [1000, 3100], 
         "dead_bosses": [],
         "unlocked_skills": ["flurry"]
     }

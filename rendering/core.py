@@ -124,3 +124,23 @@ def draw_alpha_circle(surface, color, center, radius):
         shape_surf.fill((255, 255, 255, alpha), special_flags=pygame.BLEND_RGBA_MULT)
         
     surface.blit(shape_surf, target_rect)
+
+
+def get_bezier_cubic_point(t, p0, p1, p2, p3):
+    """Расчет точки на кубической кривой Безье."""
+    u = 1 - t
+    tt, uu = t * t, u * u
+    uuu, ttt = uu * u, tt * t
+    
+    # Преобразуем в Vector2, если это кортежи, для удобства сложения
+    # (или просто работаем с компонентами как в test.py, чтобы было быстрее)
+    x = uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0]
+    y = uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1]
+    return (x, y)
+
+def get_bezier_cubic_derivative(t, p0, p1, p2, p3):
+    """Расчет касательной (производной) для поворота нормалей."""
+    u = 1 - t
+    x = 3*u*u*(p1[0]-p0[0]) + 6*u*t*(p2[0]-p1[0]) + 3*t*t*(p3[0]-p2[0])
+    y = 3*u*u*(p1[1]-p0[1]) + 6*u*t*(p2[1]-p1[1]) + 3*t*t*(p3[1]-p2[1])
+    return (x, y)

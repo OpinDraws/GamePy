@@ -43,6 +43,12 @@ COLOR_BLOOD_TRAIL = (200, 0, 0)
 
 COLOR_PARTICLE = (200, 200, 200)
 
+
+COLOR_PM_BODY = (80, 40, 140)
+COLOR_PM_BODY_DARK = (40, 10, 80)
+COLOR_PM_EYE = (255, 140, 20)
+COLOR_PM_PUPIL = (20, 0, 0)
+
 # --- Группы Спрайтов ---
 all_sprites = pygame.sprite.Group()
 bullets = pygame.sprite.Group()

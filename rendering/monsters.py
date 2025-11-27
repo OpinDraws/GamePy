@@ -1,7 +1,8 @@
 import pygame
 import math
 import random
-from .core import draw_organic_polygon, apply_sketchy_style
+from .core import draw_organic_polygon, apply_sketchy_style, get_bezier_cubic_point, get_bezier_cubic_derivative
+from core.config import COLOR_PM_BODY, COLOR_PM_BODY_DARK, COLOR_PM_EYE, COLOR_PM_PUPIL
 
 # --- ПАЛИТРА ---
 C_BODY = (40, 0, 60)
@@ -178,3 +179,164 @@ def _draw_poly_crescent_maw(surface, center, radius, look_dir):
         t2 = p_base - perp
         
         pygame.draw.polygon(surface, C_TEETH, [t1, t2, p_tip])
+
+
+
+def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offsets, angle_left, angle_right, front_pos, scale=1.0):
+    """
+    Портированная версия рендера из test.py с поддержкой масштабирования.
+    """
+    cx, cy = pos
+    
+    # 1. Рассчитываем левитацию и покачивание (тоже масштабируем амплитуду)
+    levitation = math.sin(anim_time) * (5 * scale)
+    
+    # Смещаем визуальный центр (учитываем масштаб для отступов)
+    draw_cy = cy + levitation - (20 * scale)
+    
+    tentacle_y = draw_cy + body_radius * 0.5
+    
+    lift_left = (math.sin(angle_left) + 1) / 2
+    lift_right = (math.sin(angle_right) + 1) / 2
+    
+    # Левое щупальце
+    _draw_ribbon_tentacle(surface, (cx - 30 * scale, tentacle_y), -1, lift_left, anim_time, cx, draw_cy, scale)
+    # Правое щупальце
+    _draw_ribbon_tentacle(surface, (cx + 30 * scale, tentacle_y), 1, lift_right, anim_time, cx, draw_cy, scale)
+
+    # Тело
+    _draw_pm_body(surface, cx, draw_cy, anim_time, body_radius, vertex_offsets, scale)
+    # Глаз
+    _draw_pm_eye(surface, cx, draw_cy, scale)
+    
+    # Переднее щупальце
+    _draw_front_tentacle(surface, (cx, tentacle_y + 33 * scale), front_pos, anim_time, cx, draw_cy, scale)
+
+# --- Вспомогательные функции рендера ---
+
+def _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness, round_start=False):
+    full_poly = []
+    
+    deriv0 = get_bezier_cubic_derivative(0, p0, p1, p2, p3)
+    angle_start = math.atan2(deriv0[1], deriv0[0])
+    
+    steps = 20
+    
+    if round_start:
+        right_angle = angle_start + math.pi / 2
+        cap_steps = 8
+        for i in range(cap_steps + 1):
+            t_cap = i / cap_steps
+            current_angle = right_angle + math.pi * t_cap 
+            cx = p0[0] + base_thickness * math.cos(current_angle)
+            cy = p0[1] + base_thickness * math.sin(current_angle)
+            full_poly.append((cx, cy))
+
+    left_side = []
+    right_side = []
+
+    for i in range(steps + 1):
+        t = i / steps
+        center = get_bezier_cubic_point(t, p0, p1, p2, p3)
+        deriv = get_bezier_cubic_derivative(t, p0, p1, p2, p3)
+        length = math.hypot(deriv[0], deriv[1])
+        if length == 0: length = 1
+        
+        nx, ny = deriv[1] / length, -deriv[0] / length
+        thickness = base_thickness * (1 - t**2)
+        
+        left_side.append((center[0] + nx * thickness, center[1] + ny * thickness))
+        right_side.append((center[0] - nx * thickness, center[1] - ny * thickness))
+
+    full_poly.extend(left_side)
+    full_poly.extend(right_side[::-1])
+
+    pygame.draw.polygon(surface, COLOR_PM_BODY, full_poly)
+    pygame.draw.polygon(surface, COLOR_PM_BODY_DARK, full_poly, 3)
+
+def _draw_ribbon_tentacle(surface, start_pos, side_factor, lift_offset, time, base_x, base_y, scale):
+    p0 = start_pos
+    sway_x = math.sin(time + abs(side_factor)) * (5 * scale)
+    spread = 95 * side_factor * scale
+    
+    lift_amplitude = 35 * scale
+    vertical_shift = lift_offset * lift_amplitude 
+
+    # Координаты относительно центра монстра (все оффсеты умножены на scale)
+    p1 = (base_x + spread * 0.8, base_y + (80 * scale) - vertical_shift * 0.3)
+    p2 = (base_x + spread * 1.5 + sway_x, base_y + (120 * scale) - vertical_shift)
+    p3 = (base_x + spread * 1.8 + sway_x, base_y + (160 * scale) - vertical_shift)
+
+    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=29 * scale, round_start=False)
+
+def _draw_front_tentacle(surface, start_pos, side_factor, time, base_x, base_y, scale):
+    p0 = start_pos
+    sway = math.sin(time * 0.6 + abs(side_factor)) * (5 * scale)
+    spread = 60 * side_factor * scale
+    
+    p1 = (base_x + spread * 0.5, base_y + 60 * scale)
+    p2 = (base_x + spread * 1.5 + sway, base_y + 100 * scale)
+    p3 = (base_x + spread * 2.0 + sway, base_y + 130 * scale)
+
+    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=32 * scale, round_start=True)
+
+def _draw_pm_body(surface, cx, cy, time, radius, vertex_offsets, scale):
+    n = len(vertex_offsets)
+    # Амплитуда дыхания тоже масштабируется
+    r_anim = radius + math.sin(time * 2) * (3 * scale)
+    rot = math.sin(time * 0.5) * 0.05
+    
+    vertices = []
+    for i in range(n):
+        angle = (2 * math.pi * i / n) - (math.pi / 2) + rot
+        r = r_anim + vertex_offsets[i]
+        vertices.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+        
+    smooth_poly = []
+    for i in range(n):
+        curr, next_v = vertices[i], vertices[(i+1)%n]
+        for j in range(4):
+            t = j / 4
+            px = curr[0] * (1-t) + next_v[0] * t
+            py = curr[1] * (1-t) + next_v[1] * t
+            smooth_poly.append((px, py))
+            
+    pygame.draw.polygon(surface, COLOR_PM_BODY, smooth_poly)
+    pygame.draw.polygon(surface, COLOR_PM_BODY_DARK, smooth_poly, 4)
+
+def _draw_pm_eye(surface, cx, cy, scale):
+    lid_h_radius = 60 * scale
+    lid_w_radius = 35 * scale
+    shape_power = 1.5 
+
+    lid_points = []
+    steps = 30
+    for i in range(steps):
+        theta = 2 * math.pi * i / steps
+        c = math.cos(theta)
+        s = math.sin(theta)
+        sign_c = 1 if c >= 0 else -1
+        sign_s = 1 if s >= 0 else -1
+        x = cx + lid_w_radius * sign_c * (abs(c) ** shape_power)
+        y = cy + lid_h_radius * sign_s * (abs(s) ** shape_power)
+        lid_points.append((x, y))
+
+    pygame.draw.polygon(surface, COLOR_PM_BODY, lid_points)
+    pygame.draw.polygon(surface, COLOR_PM_BODY_DARK, lid_points, max(1, int(8 * scale)))
+
+    eye_points = []
+    rx = 25 * scale
+    ry = 38 * scale
+    for i in range(steps):
+        theta = 2 * math.pi * i / steps
+        x = cx + rx * math.cos(theta)
+        y = cy + ry * math.sin(theta)
+        eye_points.append((x, y))
+        
+    pygame.draw.polygon(surface, COLOR_PM_EYE, eye_points)
+    pygame.draw.polygon(surface, COLOR_PM_BODY_DARK, eye_points, max(1, int(3 * scale)))
+    
+    # Зрачок
+    pupil_w = 6 * scale
+    pupil_h = 24 * scale
+    pygame.draw.ellipse(surface, COLOR_PM_PUPIL, (cx - pupil_w/2, cy - 12 * scale, pupil_w, pupil_h))
