@@ -26,7 +26,7 @@ class SlashFlurry:
         self.owner = owner
         self.cooldown = 2000     
         self.duration = 400      
-        self.damage = 1950         
+        self.damage = 200         
         self.radius = 140         
         self.hitbox_radius = 220
         self.timer = -2000       
