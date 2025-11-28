@@ -24,6 +24,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
     STATE_RECOVERY_PHASE_TWO = 7 
     STATE_PHASE_TWO_DASH = 8 
     STATE_CHAOS_BARRAGE = 9 
+    STATE_PREPARE_DASH = 10 # <--- НОВОЕ СОСТОЯНИЕ
 
     # --- ТАЙМИНГИ ИНТРО ---
     INTRO_PORTAL_OPEN_TIME = 60
@@ -65,6 +66,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
     DASH_DURATION = 18
     # *** ИЗМЕНЕНИЕ 1: Увеличено с 400 до 560 (1.4x) для широких экранов ***
     MOVEMENT_RADIUS = 800 
+    DASH_PREP_DURATION = int(0.7 * FPS) # 42 кадра
     
     # --- КОНСТАНТЫ ДЛЯ CHAOS BARRAGE ---
     CHAOS_BARRAGE_DURATION = 600 # 10 секунд ульты
@@ -135,6 +137,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
         self.dash_timer = self.DASH_COOLDOWN 
         self.dash_start_pos = pygame.math.Vector2(0, 0) 
         self.movement_tilt_x = 0.0 
+        self.dash_prep_progress = 0.0 # Для отрисовки   
         
         # --- НОВЫЕ ПЕРЕМЕННЫЕ ---
         self.phantom_spears = [] 
@@ -145,6 +148,8 @@ class ArchangelBoss(pygame.sprite.Sprite):
         
         self.shield_cooldown_timer = 0 
         self.rift_timer = 0 
+        self.dash_damage_dealt = False  # Флаг: нанесли ли урон рывком
+        self.shield_scale_mult = 1.0    # Множитель размера щита (обычный = 1.0)
         
         # Переменные для Интро
         self.intro_portal_progress = 0.0
@@ -309,11 +314,11 @@ class ArchangelBoss(pygame.sprite.Sprite):
         if self.shield_cooldown_timer > 0: self.shield_cooldown_timer -= 1
         
         # --- ЛОГИКА РЫВКОВ ---
-        if self.is_phase_two and self.state not in [self.STATE_PHASE_TRANSITION, self.STATE_RECOVERY_PHASE_TWO, self.STATE_PHASE_TWO_DASH, self.STATE_CHAOS_BARRAGE]:
+        if self.is_phase_two and self.state not in [self.STATE_PHASE_TRANSITION, self.STATE_RECOVERY_PHASE_TWO, self.STATE_PHASE_TWO_DASH, self.STATE_CHAOS_BARRAGE, self.STATE_PREPARE_DASH]:
             self.dash_timer -= 1
             if self.dash_timer <= 0:
                 if self.state == self.STATE_HOVER:
-                    self.start_phase_two_dash()
+                    self.start_phase_two_dash() # Теперь это запускает подготовку
 
         # --- ФИЗИКА ДВИЖЕНИЯ ---
         if self.state == self.STATE_PHASE_TWO_DASH:
@@ -323,10 +328,29 @@ class ArchangelBoss(pygame.sprite.Sprite):
             move_vec = self.target_pos - self.dash_start_pos
             if move_vec.length() > 0:
                 self.movement_tilt_x = (move_vec.normalize().x) * (1.0 - progress) 
+            
+            # --- НОВОЕ: УРОН ПРИ РЫВКЕ ---
+            if not self.dash_damage_dealt:
+                # Простая проверка коллизии (круг-круг)
+                dist_to_player = (self.pos - self.player.pos).length()
+                # Радиус босса + Радиус игрока + Запас
+                collision_dist = self.radius + self.player.radius + 10
+                
+                if dist_to_player < collision_dist:
+                    self.player.take_damage(10) # 10 единиц урона
+                    self.dash_damage_dealt = True
+                    self.shake_func(5) # Небольшая тряска при ударе
+            # -----------------------------
+
             if self.state_timer >= self.DASH_DURATION:
                 self.movement_tilt_x = 0.0 
                 self.dash_timer = self.DASH_COOLDOWN
-                self.set_state(self.STATE_HOVER)
+                
+                # --- ИЗМЕНЕНИЕ: ПЕРЕХОД В АТАКУ ЩИТОМ ---
+                # Вместо HOVER сразу бьем щитом
+                self.shield_scale_mult = 1.5 # В 1.5 раза больше
+                self.set_state(self.STATE_SHIELD_ATTACK)
+                # ----------------------------------------
         
         elif self.state == self.STATE_CHAOS_BARRAGE:
             # Дрейф к центру во время ульты
@@ -483,6 +507,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
             self.smite_vfx_progress = 0.0 
             total_dur = int(self.SHIELD_ATTACK_DURATION * factor)
             strike_time = total_dur * 0.3 
+            
             if self.state_timer <= strike_time:
                 self.shield_animation_progress = self.state_timer / strike_time
                 if self.state_timer == int(strike_time): 
@@ -490,10 +515,27 @@ class ArchangelBoss(pygame.sprite.Sprite):
             else:
                 return_progress = (self.state_timer - strike_time) / (total_dur - strike_time)
                 self.shield_animation_progress = 1.0 - return_progress
+            
             if self.state_timer >= total_dur:
                 cd_factor = 0.25 if self.is_phase_two else 1.0
                 self.shield_cooldown_timer = int(self.SHIELD_COOLDOWN * cd_factor)
+                
+                # СБРОС МНОЖИТЕЛЯ ЩИТА
+                self.shield_scale_mult = 1.0
+                
                 self.set_state(self.STATE_HOVER)
+        # --- НОВАЯ ЛОГИКА ПОДГОТОВКИ К РЫВКУ ---
+        elif self.state == self.STATE_PREPARE_DASH:
+            # Увеличиваем прогресс
+            self.dash_prep_progress = self.state_timer / self.DASH_PREP_DURATION
+            
+            # Поворачиваем босса в сторону будущей точки рывка (для красоты)
+            direction_to_target = self.target_pos.x - self.pos.x
+            target_tilt = -1.0 if direction_to_target > 0 else 1.0 # Наклон в противоположную сторону (подготовка)
+            self.movement_tilt_x += (target_tilt * 0.5 - self.movement_tilt_x) * 0.1
+
+            if self.state_timer >= self.DASH_PREP_DURATION:
+                self.execute_dash() # Переходим к самому рывку
 
         elif self.state == self.STATE_PHASE_TRANSITION:
             progress = min(1.0, self.state_timer / self.PHASE_TRANSITION_DURATION)
@@ -578,28 +620,96 @@ class ArchangelBoss(pygame.sprite.Sprite):
                 break
 
     def start_phase_two_dash(self):
-        self.set_state(self.STATE_PHASE_TWO_DASH)
+        """
+        Начинает ПОДГОТОВКУ к рывку.
+        Выбирает точку с учетом приоритетов:
+        - 40%: Агрессивно к игроку (радиус 350)
+        - 35%: Отступление/Кайт (дальше 600 от игрока)
+        - 25%: Случайное патрулирование (старая логика)
+        """
+        self.set_state(self.STATE_PREPARE_DASH)
+        self.dash_prep_progress = 0.0
         self.dash_start_pos = self.pos.copy()
-        target_x, target_y = self.pos.x, self.pos.y
         
-        for _ in range(15):
-            angle = random.uniform(0, math.pi * 2)
-            dist = random.uniform(420, self.MOVEMENT_RADIUS) 
-            offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
-            
-            # --- ЗАМЕНИТЬ РАСЧЕТ candidate_x/y НА ЭТО ---
-            cx, cy = self.arena_center.x, self.arena_center.y
-            # Ограничиваем точкой спавна +/- 900 пикселей
-            candidate_x = max(cx - 900, min(cx + 900, cx + offset.x))
-            candidate_y = max(cy - 900, min(cy + 900, cy + offset.y))
-            # ---------------------------------------------
+        # Границы арены (центр +/- 900)
+        min_x = self.arena_center.x - 900
+        max_x = self.arena_center.x + 900
+        min_y = self.arena_center.y - 900
+        max_y = self.arena_center.y + 900
 
-            if abs(candidate_x - self.pos.x) >= 260 and abs(candidate_y - self.pos.y) >= 260:
-                target_x, target_y = candidate_x, candidate_y
+        # Точка по умолчанию (на случай если не найдем идеальную)
+        target_pos = self.arena_center.copy() 
+        
+        # Бросаем кубик судьбы
+        roll = random.random() # 0.0 ... 1.0
+        
+        if roll < 0.40:
+            strategy = 'AGGRO' # Возле игрока
+        elif roll < 0.75:      # 0.40 + 0.35 = 0.75
+            strategy = 'KITE'  # Далеко от игрока
+        else:
+            strategy = 'RANDOM' # Как раньше
+
+        # Пытаемся найти точку (15 попыток)
+        for _ in range(15):
+            candidate = pygame.math.Vector2()
+            
+            if strategy == 'AGGRO':
+                # Случайная точка в радиусе 100-350 от игрока
+                angle = random.uniform(0, math.pi * 2)
+                dist = random.uniform(50, 350) 
+                offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
+                candidate = self.player.pos + offset
+                
+            elif strategy == 'KITE':
+                # Случайная точка на арене
+                rx = random.uniform(min_x, max_x)
+                ry = random.uniform(min_y, max_y)
+                candidate = pygame.math.Vector2(rx, ry)
+                
+            else: # RANDOM (Старая логика)
+                # Кольцо вокруг центра арены
+                angle = random.uniform(0, math.pi * 2)
+                dist = random.uniform(420, self.MOVEMENT_RADIUS) 
+                offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
+                candidate = self.arena_center + offset
+
+            # 1. Ограничиваем границами арены
+            candidate.x = max(min_x, min(max_x, candidate.x))
+            candidate.y = max(min_y, min(max_y, candidate.y))
+            
+            # 2. Проверки валидности
+            valid = True
+            
+            # Проверка длины рывка (босс не должен прыгать на 1 метр)
+            # Если точка слишком близко к БОССУ, ищем другую
+            if (candidate - self.pos).length() < 250:
+                valid = False
+            
+            # Специфичная проверка для KITE (должна быть далеко от ИГРОКА)
+            if valid and strategy == 'KITE':
+                dist_to_player = (candidate - self.player.pos).length()
+                if dist_to_player < 600:
+                    valid = False
+            
+            # Если точка прошла все проверки - берем её
+            if valid:
+                target_pos = candidate
                 break
         
-        self.target_pos = pygame.math.Vector2(target_x, target_y)
+        self.target_pos = target_pos
+        # Босс не двигается сразу, он ждет окончания таймера STATE_PREPARE_DASH (0.7 сек)
+
+    def execute_dash(self):
+        """
+        Фактическое выполнение рывка.
+        """
+        self.set_state(self.STATE_PHASE_TWO_DASH)
+        self.dash_prep_progress = 0.0
+        self.dash_damage_dealt = False # Сбрасываем флаг урона перед рывком
         self.shake_func(5)
+
+    
 
     def enter_phase_two(self):
         self.set_state(self.STATE_PHASE_TRANSITION)
@@ -616,9 +726,15 @@ class ArchangelBoss(pygame.sprite.Sprite):
     
     def spawn_shield_wave(self):
         wave_pos = self.pos + pygame.math.Vector2(10, -20)
-        radius = 300 if self.is_phase_two else 190
-        ShieldWaveVFX(wave_pos, max_radius=radius, damage=30, push_force=25, duration=30)
-        self.shake_func(10) 
+        
+        # Базовый радиус
+        base_radius = 300 if self.is_phase_two else 190
+        
+        # Применяем множитель (будет 1.5 после рывка, 1.0 обычно)
+        final_radius = base_radius * self.shield_scale_mult
+        
+        ShieldWaveVFX(wave_pos, max_radius=final_radius, damage=30, push_force=25, duration=30)
+        self.shake_func(10 * self.shield_scale_mult) # Тряска тоже сильнее
 
     def start_mist_effect(self, factor=1.0):
         self.fixed_target_pos = self.player.pos.copy() 

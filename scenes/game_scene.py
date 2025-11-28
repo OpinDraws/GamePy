@@ -111,7 +111,7 @@ class GameScene(Scene):
         # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ
         
         # Монстр 1 (Слева)
-        pos_m1 = self.player.pos + pygame.math.Vector2(-150, 50) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
+        pos_m1 = self.player.pos + pygame.math.Vector2(-250, 100) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
         m1 = TentacleEnemy(
             pos_m1, 
             self.player, 
@@ -125,7 +125,7 @@ class GameScene(Scene):
         m1.attention_timer = -99999 
 
         # Монстр 2 (Справа)
-        pos_m2 = self.player.pos + pygame.math.Vector2(150, 50) # Чуть отодвинул (150)
+        pos_m2 = self.player.pos + pygame.math.Vector2(0, 300) # Чуть отодвинул (150)
         m3 = TentacleEnemy(
             pos_m2, 
             self.player, 
@@ -137,7 +137,7 @@ class GameScene(Scene):
         # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
         m3.attention_state = 'FOCUS'
         m3.attention_timer = -99999
-        pos_m3 = self.player.pos + pygame.math.Vector2(150, 50) # Чуть отодвинул (150)
+        pos_m3 = self.player.pos + pygame.math.Vector2(250, 100) # Чуть отодвинул (150)
         m3 = TentacleEnemy(
             pos_m3, 
             self.player, 
@@ -286,10 +286,14 @@ class GameScene(Scene):
                 'flash_alpha': getattr(self.boss, 'death_flash_alpha', 0)
             }
             
+            dash_target_screen_pos = None
+            if self.boss.state == self.boss.STATE_PREPARE_DASH:
+                dash_target_screen_pos = self.boss.target_pos + total_offset
+
             draw_archangel_boss(
                 screen, 
                 self.boss.pos + total_offset, 
-                self.boss.time_ticks, 
+                self.boss.time_ticks,
                 self.boss.spear_animation_progress,
                 self.boss.vfx_mist_active, 
                 self.boss.state_timer if self.boss.state == self.boss.STATE_MIST_EFFECT else 0,
@@ -303,7 +307,10 @@ class GameScene(Scene):
                 self.boss.movement_tilt_x,
                 alpha=getattr(self.boss, 'current_alpha', 255),
                 is_final_attack=(self.boss.state == self.boss.STATE_CHAOS_BARRAGE),
-                death_params=death_data
+                death_params=death_data,
+                # НОВЫЕ ПАРАМЕТРЫ:
+                dash_prep_progress=getattr(self.boss, 'dash_prep_progress', 0.0),
+                dash_target_pos=dash_target_screen_pos
             )
             
             draw_boss_hud_new(
