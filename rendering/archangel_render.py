@@ -40,6 +40,8 @@ C_SKIN_HIGHLIGHT = (255, 245, 240, 150)
 C_RED_BRIGHT = (255, 50, 50, 255)
 C_RED_GLOW = (255, 100, 100, 150)
 C_RED_DEEP = (150, 0, 0, 255) # Добавим темный красный для наконечника
+C_DASH_INDICATOR_FILL = (255, 215, 0, 50)   # Полупрозрачный желтый
+C_DASH_INDICATOR_BORDER = (255, 255, 100)   # Яркий желтый
 
 # --- Хелперы ---
 
@@ -254,6 +256,121 @@ def calculate_ik_points(shoulder_pos, hand_pos, bend_right=True):
 
 
 # --- Основные функции отрисовки (остальные) ---
+
+def draw_dash_telegraph(surface, start_pos, target_pos, progress):
+    """
+    Рисует индикатор рывка: растущий круг и вытягивающуюся стрелку.
+    start_pos: Экранные координаты босса
+    target_pos: Экранные координаты точки назначения
+    progress: 0.0 -> 1.0 (время жизни эффекта)
+    """
+    # Тайминги (на основе 0.7 сек)
+    GROWTH_PHASE = 0.85 # Фаза роста
+    
+    # ИЗМЕНЕНИЕ: Радиус увеличен в 2 раза (было 90 -> стало 180)
+    max_circle_radius = 180 
+    
+    # Параметры стрелки
+    arrow_width = 100
+    gap_from_boss = 50        # Отступ от босса
+    gap_from_circle = 50      # Отступ от края круга
+    
+    if progress < GROWTH_PHASE:
+        # Фаза роста (0.0 -> 0.6 сек)
+        local_p = progress / GROWTH_PHASE
+        t = 1 - (1 - local_p) ** 3 # Ease Out
+        
+        current_circle_r = max_circle_radius * t
+        
+        # Стрелка растет линейно или с тем же easing
+        arrow_growth_t = t
+        
+        alpha_mult = 1.0
+    else:
+        # Фаза исчезновения (0.6 -> 0.7 сек)
+        current_circle_r = max_circle_radius
+        arrow_growth_t = 1.0
+        
+        local_p = (progress - GROWTH_PHASE) / (1.0 - GROWTH_PHASE)
+        alpha_mult = 1.0 - local_p
+
+    # Цвета с учетом альфы
+    fill_color = C_DASH_INDICATOR_FILL[:3] + (int(C_DASH_INDICATOR_FILL[3] * alpha_mult),)
+    border_color = C_DASH_INDICATOR_BORDER[:3] + (int(255 * alpha_mult),)
+
+    # --- 1. РИСУЕМ КРУГ ---
+    if current_circle_r > 1:
+        # Заливка
+        draw_alpha_circle(surface, fill_color, target_pos, int(current_circle_r))
+        # Обводка (яркая)
+        # Рисуем через pygame.draw.circle (он не поддерживает alpha напрямую для линий, 
+        # поэтому рисуем на временной поверхности или используем полигон, но для простоты и скорости:
+        draw_outline_circle(surface, target_pos, current_circle_r, border_color)
+
+    # --- 2. РИСУЕМ СТРЕЛКУ ---
+    # Векторная математика
+    start_vec = pygame.math.Vector2(start_pos)
+    target_vec = pygame.math.Vector2(target_pos)
+    diff = target_vec - start_vec
+    dist = diff.length()
+    
+    # Защита от деления на ноль
+    if dist < 1: return
+    
+    direction = diff.normalize()
+    perp = pygame.math.Vector2(-direction.y, direction.x) # Перпендикуляр для ширины
+    
+    # Рассчитываем полную длину пути стрелки
+    # Dist - (Отступ от босса) - (Отступ от круга) - (Радиус круга)
+    # Стрелка должна касаться "зоны" вокруг круга
+    total_arrow_len = dist - gap_from_boss - (gap_from_circle + max_circle_radius)
+    
+    if total_arrow_len > 0:
+        current_arrow_len = total_arrow_len * arrow_growth_t
+        
+        # Точки стрелки
+        # Начало (у босса + отступ)
+        p_base = start_vec + direction * gap_from_boss
+        # Конец (с учетом роста)
+        p_tip = p_base + direction * current_arrow_len
+        
+        # Формируем полигон (Прямоугольник + Треугольный наконечник)
+        head_size = 40 # Размер наконечника
+        
+        # Если стрелка еще слишком короткая для наконечника, рисуем просто прямоугольник
+        if current_arrow_len < head_size:
+            poly_points = [
+                p_base + perp * (arrow_width / 2),
+                p_base - perp * (arrow_width / 2),
+                p_tip - perp * (arrow_width / 2),
+                p_tip + perp * (arrow_width / 2),
+            ]
+        else:
+            # Основание стрелки (прямоугольная часть)
+            p_neck = p_tip - direction * head_size
+            
+            poly_points = [
+                p_base + perp * (arrow_width / 2),          # Левый низ
+                p_base - perp * (arrow_width / 2),          # Правый низ
+                p_neck - perp * (arrow_width / 2),          # Правый верх (перед наконечником)
+                p_neck - perp * (arrow_width / 2 + 20),     # Расширение для наконечника
+                p_tip,                                      # Острие
+                p_neck + perp * (arrow_width / 2 + 20),     # Расширение для наконечника
+                p_neck + perp * (arrow_width / 2)           # Левый верх
+            ]
+            
+        # Рисуем стрелку
+        draw_alpha_polygon(surface, fill_color, poly_points)
+        # Обводка стрелки (яркая)
+        if alpha_mult > 0.1:
+            pygame.draw.lines(surface, border_color, True, poly_points, 3)
+
+def draw_outline_circle(surface, center, radius, color):
+    """Вспомогательная функция для рисования прозрачного кольца"""
+    target_rect = pygame.Rect(center[0]-radius, center[1]-radius, radius*2, radius*2)
+    shape_surf = pygame.Surface(target_rect.size, pygame.SRCALPHA)
+    pygame.draw.circle(shape_surf, color, (int(radius), int(radius)), int(radius), 3)
+    surface.blit(shape_surf, target_rect)
 
 # *** ИЗМЕНЕНО: Добавлен аргумент movement_tilt_x ***
 def draw_layered_wing(surface, root_pos, angle_deg, scale, time_ticks, flip=False, movement_tilt_x=0.0, alpha=255):
@@ -554,18 +671,20 @@ def _draw_archangel_internal(surface, draw_pos, time_ticks, spear_animation_prog
         draw_alpha_circle(surface, (255, 255, 200, int(death_flash_alpha * 0.5)), draw_pos, 200)
 
 # --- ОБНОВЛЕНА СИГНАТУРА: добавлен is_final_attack ---
-def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress=0.0, shield_animation_progress=0.0, is_phase_two=False, wing_spread_factor=0.0, is_transitioning=False, transition_pose_factor=0.0, movement_tilt_x=0.0, alpha=255, is_final_attack=False, death_params=None): 
+def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progress, is_mist_active, mist_timer, fixed_target_pos, smite_vfx_progress=0.0, shield_animation_progress=0.0, is_phase_two=False, wing_spread_factor=0.0, is_transitioning=False, transition_pose_factor=0.0, movement_tilt_x=0.0, alpha=255, is_final_attack=False, death_params=None, dash_prep_progress=0.0, dash_target_pos=None): 
     if alpha <= 0: return
+    if death_params is None: death_params = {}
     
-    # Если параметры смерти не переданы, используем пустой словарь
-    if death_params is None: 
-        death_params = {}
-    
+    # 1. ТЕЛЕГРАФ РЫВКА
+    if dash_target_pos is not None and dash_prep_progress > 0:
+        # Передаем: (Поверхность, Позиция Босса, Позиция Цели, Прогресс)
+        draw_dash_telegraph(surface, center_pos, dash_target_pos, dash_prep_progress)
+
+    # ... (Остальной код без изменений) ...
     surf_w, surf_h = 600, 600
     temp_surf = pygame.Surface((surf_w, surf_h), pygame.SRCALPHA)
     local_center = pygame.math.Vector2(surf_w // 2, surf_h // 2)
     
-    # --- ИСПРАВЛЕНИЕ: Добавлен аргумент death_params в вызов ---
     _draw_archangel_internal(
         temp_surf, 
         local_center, 
@@ -582,7 +701,7 @@ def draw_archangel_boss(surface, center_pos, time_ticks, spear_animation_progres
         transition_pose_factor, 
         movement_tilt_x, 
         is_final_attack, 
-        death_params  # <--- ВОТ ЭТОГО НЕ ХВАТАЛО
+        death_params
     )
     
     if alpha < 255:
