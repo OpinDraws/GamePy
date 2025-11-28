@@ -187,7 +187,7 @@ def _draw_poly_crescent_maw(surface, center, radius, look_dir):
 # ... (импорты)
 
 # 1. Обновляем сигнатуру главной функции (добавляем front_tentacle_spread)
-def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offsets, angle_left, angle_right, front_pos, scale=1.0, tentacle_spread=1.0, tentacle_extension=0.0, front_tentacle_spread=1.0):
+def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offsets, angle_left, angle_right, front_pos, scale=1.0, tentacle_spread=1.0, tentacle_extension=0.0, front_tentacle_spread=1.0, strike_tentacle_data=None):
     cx, cy = pos
     
     levitation = math.sin(anim_time) * (5 * scale)
@@ -195,6 +195,22 @@ def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offs
     
     tentacle_y = draw_cy + body_radius * 0.5
     
+    # --- НОВОЕ: ОТРИСОВКА БОЕВОГО ЩУПАЛЬЦА (Слой сзади - рисуем первым) ---
+    if strike_tentacle_data:
+        # Данные должны содержать p2 и p3 (середину и кончик)
+        s_p2 = strike_tentacle_data.get('p2')
+        s_p3 = strike_tentacle_data.get('p3')
+        if s_p2 and s_p3:
+            # Рисуем большое щупальце (scale * 2.5)
+            # p0 (база) всегда в центре тела
+            _draw_front_tentacle(
+                surface, (cx, tentacle_y), 0, anim_time, cx, draw_cy, 
+                scale * 1.5, # Размер в 2.5 раза больше
+                override_p2=s_p2, 
+                override_p3=s_p3
+            )
+    # ----------------------------------------------------------------------
+
     lift_left = (math.sin(angle_left) + 1) / 2
     lift_right = (math.sin(angle_right) + 1) / 2
     
@@ -204,7 +220,6 @@ def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offs
     _draw_pm_body(surface, cx, draw_cy, anim_time, body_radius, vertex_offsets, scale)
     _draw_pm_eye(surface, cx, draw_cy, scale)
     
-    # 2. Передаем этот параметр в функцию отрисовки переднего щупальца
     _draw_front_tentacle(surface, (cx, tentacle_y + 33 * scale), front_pos, anim_time, cx, draw_cy, scale, spread_factor=front_tentacle_spread)
 
 
@@ -291,21 +306,27 @@ def _draw_ribbon_tentacle(surface, start_pos, side_factor, lift_offset, time, ba
 
 
 #140 20 45
-def _draw_front_tentacle(surface, start_pos, side_factor, time, base_x, base_y, scale, spread_factor=1.0):
+def _draw_front_tentacle(surface, start_pos, side_factor, time, base_x, base_y, scale, spread_factor=1.0, override_p2=None, override_p3=None):
     p0 = start_pos
     
-    # Уменьшаем покачивание, если щупальце прижато
-    sway = math.sin(time * 0.6 + abs(side_factor)) * (5 * scale) * spread_factor
-    
-    # ГЛАВНОЕ ИЗМЕНЕНИЕ: Умножаем смещение на spread_factor
-    spread = 60 * side_factor * scale * spread_factor
-    
-    p1 = (base_x + spread * 0.5, base_y + 100 * scale)
-    p2 = (base_x + spread * 1.5 + sway, base_y + 20 * scale)
-    p3 = (base_x + spread * 2.0 + sway, base_y + 50 * scale)
+    # Если переданы конкретные координаты (для атаки), используем их
+    if override_p2 is not None and override_p3 is not None:
+        p1 = (p0[0], p0[1] + 50 * scale) # Первый сустав немного вниз от тела
+        p2 = override_p2
+        p3 = override_p3
+        # Более толстое основание для огромного щупальца
+        thickness = 40 * scale 
+    else:
+        # Стандартная процедурная анимация (покачивание)
+        sway = math.sin(time * 0.6 + abs(side_factor)) * (5 * scale) * spread_factor
+        spread = 60 * side_factor * scale * spread_factor
+        
+        p1 = (base_x + spread * 0.5, base_y + 100 * scale)
+        p2 = (base_x + spread * 1.5 + sway, base_y + 20 * scale)
+        p3 = (base_x + spread * 2.0 + sway, base_y + 50 * scale)
+        thickness = 32 * scale
 
-    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=32 * scale, round_start=True)
-
+    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=thickness, round_start=True)
 
 #100 -29 -60
 def _draw_pm_body(surface, cx, cy, time, radius, vertex_offsets, scale):
