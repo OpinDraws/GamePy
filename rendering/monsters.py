@@ -182,16 +182,15 @@ def _draw_poly_crescent_maw(surface, center, radius, look_dir):
 
 
 
-def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offsets, angle_left, angle_right, front_pos, scale=1.0):
-    """
-    Портированная версия рендера из test.py с поддержкой масштабирования.
-    """
+# rendering/monsters.py
+
+# ... (импорты)
+
+# 1. Обновляем сигнатуру главной функции (добавляем front_tentacle_spread)
+def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offsets, angle_left, angle_right, front_pos, scale=1.0, tentacle_spread=1.0, tentacle_extension=0.0, front_tentacle_spread=1.0):
     cx, cy = pos
     
-    # 1. Рассчитываем левитацию и покачивание (тоже масштабируем амплитуду)
     levitation = math.sin(anim_time) * (5 * scale)
-    
-    # Смещаем визуальный центр (учитываем масштаб для отступов)
     draw_cy = cy + levitation - (20 * scale)
     
     tentacle_y = draw_cy + body_radius * 0.5
@@ -199,18 +198,16 @@ def draw_procedural_monster_v2(surface, pos, anim_time, body_radius, vertex_offs
     lift_left = (math.sin(angle_left) + 1) / 2
     lift_right = (math.sin(angle_right) + 1) / 2
     
-    # Левое щупальце
-    _draw_ribbon_tentacle(surface, (cx - 30 * scale, tentacle_y), -1, lift_left, anim_time, cx, draw_cy, scale)
-    # Правое щупальце
-    _draw_ribbon_tentacle(surface, (cx + 30 * scale, tentacle_y), 1, lift_right, anim_time, cx, draw_cy, scale)
+    _draw_ribbon_tentacle(surface, (cx - 30 * scale * tentacle_spread, tentacle_y), -1, lift_left, anim_time, cx, draw_cy, scale, tentacle_spread, tentacle_extension)
+    _draw_ribbon_tentacle(surface, (cx + 30 * scale * tentacle_spread, tentacle_y), 1, lift_right, anim_time, cx, draw_cy, scale, tentacle_spread, tentacle_extension)
 
-    # Тело
     _draw_pm_body(surface, cx, draw_cy, anim_time, body_radius, vertex_offsets, scale)
-    # Глаз
     _draw_pm_eye(surface, cx, draw_cy, scale)
     
-    # Переднее щупальце
-    _draw_front_tentacle(surface, (cx, tentacle_y + 33 * scale), front_pos, anim_time, cx, draw_cy, scale)
+    # 2. Передаем этот параметр в функцию отрисовки переднего щупальца
+    _draw_front_tentacle(surface, (cx, tentacle_y + 33 * scale), front_pos, anim_time, cx, draw_cy, scale, spread_factor=front_tentacle_spread)
+
+
 
 # --- Вспомогательные функции рендера ---
 
@@ -254,32 +251,63 @@ def _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness, round_start=Fa
     pygame.draw.polygon(surface, COLOR_PM_BODY, full_poly)
     pygame.draw.polygon(surface, COLOR_PM_BODY_DARK, full_poly, 3)
 
-def _draw_ribbon_tentacle(surface, start_pos, side_factor, lift_offset, time, base_x, base_y, scale):
+def _draw_ribbon_tentacle(surface, start_pos, side_factor, lift_offset, time, base_x, base_y, scale, spread_factor=1.0, extension_offset=0.0):
     p0 = start_pos
-    sway_x = math.sin(time + abs(side_factor)) * (5 * scale)
-    spread = 95 * side_factor * scale
+    
+    sway_amp = (5 * scale) * spread_factor
+    sway_x = math.sin(time + abs(side_factor)) * sway_amp
+    
+    # X: Spread (Мультипликативное сжатие ширины)
+    base_spread = 95 * scale
+    spread = base_spread * side_factor * spread_factor
     
     lift_amplitude = 35 * scale
     vertical_shift = lift_offset * lift_amplitude 
 
-    # Координаты относительно центра монстра (все оффсеты умножены на scale)
-    p1 = (base_x + spread * 0.8, base_y + (80 * scale) - vertical_shift * 0.3)
-    p2 = (base_x + spread * 1.5 + sway_x, base_y + (120 * scale) - vertical_shift)
-    p3 = (base_x + spread * 1.8 + sway_x, base_y + (160 * scale) - vertical_shift)
-
-    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=29 * scale, round_start=False)
-
-def _draw_front_tentacle(surface, start_pos, side_factor, time, base_x, base_y, scale):
-    p0 = start_pos
-    sway = math.sin(time * 0.6 + abs(side_factor)) * (5 * scale)
-    spread = 60 * side_factor * scale
+    # Y: Extension (Аддитивное удлинение/укорачивание)
+    # Мы распределяем offset: чем ниже точка, тем сильнее она сдвигается.
+    # Это сохраняет привязку к телу (p0) и двигает кончик (p3).
     
-    p1 = (base_x + spread * 0.5, base_y + 60 * scale)
-    p2 = (base_x + spread * 1.5 + sway, base_y + 100 * scale)
-    p3 = (base_x + spread * 2.0 + sway, base_y + 130 * scale)
+    # Точка 1: 30% от смещения
+    y1 = base_y + (140 * scale) + (extension_offset * 0.3) - vertical_shift * 0.3
+    
+    # Точка 2: 70% от смещения
+    y2 = base_y + (20 * scale) + (extension_offset * 0.7) - vertical_shift
+    
+    # Точка 3 (Кончик): 100% от смещения
+    y3 = base_y + (45 * scale) + extension_offset - vertical_shift
+
+    p1 = (base_x + spread * 0.8, y1)
+    p2 = (base_x + spread * 1.5 + sway_x, y2)
+    p3 = (base_x + spread * 1.8 + sway_x, y3)
+
+    # Толщина
+    thickness = 29 * scale
+    # Если сильно сжимаем, чуть уменьшаем толщину, чтобы не было "каши"
+    if extension_offset < -50:
+        thickness *= 0.8
+
+    _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=thickness, round_start=False)
+
+
+#140 20 45
+def _draw_front_tentacle(surface, start_pos, side_factor, time, base_x, base_y, scale, spread_factor=1.0):
+    p0 = start_pos
+    
+    # Уменьшаем покачивание, если щупальце прижато
+    sway = math.sin(time * 0.6 + abs(side_factor)) * (5 * scale) * spread_factor
+    
+    # ГЛАВНОЕ ИЗМЕНЕНИЕ: Умножаем смещение на spread_factor
+    spread = 60 * side_factor * scale * spread_factor
+    
+    p1 = (base_x + spread * 0.5, base_y + 100 * scale)
+    p2 = (base_x + spread * 1.5 + sway, base_y + 20 * scale)
+    p3 = (base_x + spread * 2.0 + sway, base_y + 50 * scale)
 
     _draw_ribbon_polygon(surface, p0, p1, p2, p3, base_thickness=32 * scale, round_start=True)
 
+
+#100 -29 -60
 def _draw_pm_body(surface, cx, cy, time, radius, vertex_offsets, scale):
     n = len(vertex_offsets)
     # Амплитуда дыхания тоже масштабируется
