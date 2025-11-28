@@ -107,35 +107,48 @@ class GameScene(Scene):
         # 1. СНАЧАЛА ЗАГРУЖАЕМ КОМНАТУ (Это создает стены и очищает старых врагов)
         self.world_manager.load_room(current_room, start_pos) 
         
-        # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ (Чтобы они добавились в чистую группу enemies)
+        
+        # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ
         
         # Монстр 1 (Слева)
-        pos_m1 = self.player.pos + pygame.math.Vector2(-60, 50) # -60 чтобы не перекрывать игрока, если стоять вплотную
+        pos_m1 = self.player.pos + pygame.math.Vector2(-150, 50) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
         m1 = TentacleEnemy(
             pos_m1, 
             self.player, 
-            [all_sprites, enemies], # Теперь enemies не очистится после этого
+            [all_sprites, enemies], 
             [all_sprites, particles], 
             self.screen_shake.shake
         )
         m1.health = 150
-        m1.base_speed = 0            
+        # m1.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
         m1.attention_state = 'FOCUS' 
         m1.attention_timer = -99999 
 
         # Монстр 2 (Справа)
-        pos_m2 = self.player.pos + pygame.math.Vector2(60, 50)
-        m2 = TentacleEnemy(
+        pos_m2 = self.player.pos + pygame.math.Vector2(150, 50) # Чуть отодвинул (150)
+        m3 = TentacleEnemy(
             pos_m2, 
             self.player, 
             [all_sprites, enemies], 
             [all_sprites, particles], 
             self.screen_shake.shake
         )
-        m2.health = 150
-        m2.base_speed = 0
-        m2.attention_state = 'FOCUS'
-        m2.attention_timer = -99999
+        m3.health = 150
+        # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
+        m3.attention_state = 'FOCUS'
+        m3.attention_timer = -99999
+        pos_m3 = self.player.pos + pygame.math.Vector2(150, 50) # Чуть отодвинул (150)
+        m3 = TentacleEnemy(
+            pos_m3, 
+            self.player, 
+            [all_sprites, enemies], 
+            [all_sprites, particles], 
+            self.screen_shake.shake
+        )
+        m3.health = 150
+        # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
+        m3.attention_state = 'FOCUS'
+        m3.attention_timer = -99999
         # --------------------------------------------
         
         self.boss = ArchangelBoss(-1000, -1000, self.player)
