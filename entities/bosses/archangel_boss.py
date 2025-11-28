@@ -25,6 +25,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
     STATE_PHASE_TWO_DASH = 8 
     STATE_CHAOS_BARRAGE = 9 
     STATE_PREPARE_DASH = 10 # <--- НОВОЕ СОСТОЯНИЕ
+    STATE_PREPARE_PUNISHMENT_SPEARS = 11
 
     # --- ТАЙМИНГИ ИНТРО ---
     INTRO_PORTAL_OPEN_TIME = 60
@@ -61,6 +62,12 @@ class ArchangelBoss(pygame.sprite.Sprite):
     SHIELD_ATTACK_DURATION = 45 
     SHIELD_COOLDOWN = 120 
 
+    # --- КОНСТАНТЫ ДЛЯ НОВОЙ АТАКИ (Копья Наказания) ---
+    PUNISHMENT_SPEAR_DELAY_MS = 500    # Начальная задержка перед всем паттерном
+    PUNISHMENT_SPEAR_SIDE_OFFSET = 200 # Смещение вбок от игрока
+    PUNISHMENT_SPEAR_DISTANCE = 50     # Расстояние между копьями (УВЕЛИЧЕНО до 50)
+    PUNISHMENT_SPEAR_STAGGER_MS = 200  # Интервал между копьями (ритм атаки)
+  
     # --- КОНСТАНТЫ МОБИЛЬНОСТИ (ФАЗА 2) ---
     DASH_COOLDOWN = 210 
     DASH_DURATION = 18
@@ -438,13 +445,24 @@ class ArchangelBoss(pygame.sprite.Sprite):
             self.transition_pose_factor = 0.0 
 
             if self.cooldown_timer <= 0:
-                if self.attack_counter % 2 == 0:
+                # --- ИЗМЕНЕНИЕ: Чередование 3-х атак ---
+                # 0 = Обычные копья
+                # 1 = Кара (Smite)
+                # 2 = Копья Наказания (Новая)
+                cycle = self.attack_counter % 3
+                
+                if cycle == 0:
                     self.set_state(self.STATE_PREPARE_SPEAR)
                     self.start_mist_effect(factor)
                     self.spawn_visual_spears(factor)
-                else:
+                elif cycle == 1:
                     self.set_state(self.STATE_PREPARE_SMITE)
                     self.start_smite_attack(factor) 
+                else: # cycle == 2
+                    self.set_state(self.STATE_PREPARE_PUNISHMENT_SPEARS)
+                    # Спецэффекты для этой атаки (появление копий) 
+                    # запускаются внутри логики этого состояния, здесь ничего звать не нужно.
+                
                 self.attack_counter += 1
 
         elif self.state == self.STATE_PREPARE_SPEAR:
@@ -475,14 +493,38 @@ class ArchangelBoss(pygame.sprite.Sprite):
             if self.state_timer >= mist_dur:
                 self.activate_spears_flight() 
                 self.set_state(self.STATE_LAUNCH_SPEAR)
+        elif self.state == self.STATE_PREPARE_PUNISHMENT_SPEARS:
+            # Используем время подготовки как для обычной атаки копьем
+            full_state_duration = int(self.PREPARE_DURATION * factor)
+            self.spear_animation_progress = self.state_timer / full_state_duration 
+            
+            if self.state_timer >= full_state_duration:
+                # Спавним копья - они появятся и будут висеть 1 секунду
+                self.spawn_punishment_spears()
+                
+                # Переходим в LAUNCH_SPEAR для завершающей анимации босса (45 кадров)
+                self.set_state(self.STATE_LAUNCH_SPEAR) 
+                self.state_timer = 0
+                
+                # Устанавливаем кулдаун, равный времени полета копья + небольшой буфер
+                # Время полета: Задержка (1000мс) + Полет (500мс) + Буфер (~200мс) = 1700мс
+                # Переводим в кадры: 1700 / (1000/FPS) ~ 102 кадра (при 60 FPS)
+                cooldown_frames = int((self.PUNISHMENT_SPEAR_DELAY_MS + self.FIXED_FLIGHT_TIME_MS + 200) * (FPS / 1000))
+                self.cooldown_timer = cooldown_frames
 
         elif self.state == self.STATE_LAUNCH_SPEAR:
-            dur = int(self.LAUNCH_DURATION * factor)
+            dur = int(self.LAUNCH_DURATION * factor) # <-- Здесь переменная называется dur
             progress = self.state_timer / dur
             self.spear_animation_progress = max(0.0, 1.0 - progress) 
             self.smite_vfx_progress = 0.0 
+            
+            # ИСПРАВЛЕНО: используем dur вместо full_state_duration
             if self.state_timer >= dur:
-                self.cooldown_timer = int(self.COOLDOWN_DURATION * factor)
+                # Если текущий кулдаун (установленный в Punishment Spears) больше обычного,
+                # мы его НЕ перезаписываем. Если меньше или равен (обычная атака), сбрасываем.
+                if self.cooldown_timer <= self.COOLDOWN_DURATION * factor:
+                    self.cooldown_timer = int(self.COOLDOWN_DURATION * factor)
+
                 self.set_state(self.STATE_HOVER)
 
         elif self.state == self.STATE_PREPARE_SMITE:
@@ -571,6 +613,84 @@ class ArchangelBoss(pygame.sprite.Sprite):
                 # БЫЛО: self.kill()
                 # СТАЛО: Переход в состояние смерти после ульты
                 self.set_state(self.STATE_DEATH)
+
+
+
+    def spawn_punishment_spears(self):
+        """
+        Спавнит 8 копий (4 слева, 4 справа) вокруг ИГРОКА.
+        Копья появляются по очереди и выстреливают сразу после появления следующего.
+        """
+        # 1. Фиксируем позицию цели (Игрока)
+        # Если это первый кадр атаки, fixed_target_pos сбрасывается в (0,0) в update_state_logic,
+        # поэтому здесь мы захватываем актуальную позицию игрока.
+        if self.fixed_target_pos.length_squared() == 0: 
+            self.fixed_target_pos = self.player.pos.copy()
+
+        center_x = self.fixed_target_pos.x
+        center_y = self.fixed_target_pos.y
+
+        # Количество копий с каждой стороны
+        SPEARS_PER_SIDE = 4
+        
+        # Общая высота построения (чтобы центрировать по вертикали относительно игрока)
+        total_height = SPEARS_PER_SIDE * self.PUNISHMENT_SPEAR_DISTANCE
+        start_y = center_y - (total_height / 2) + (self.PUNISHMENT_SPEAR_DISTANCE / 2)
+
+        # Тайминг проявления копья (совпадает с интервалом, чтобы было бесшовно)
+        APPEAR_TIME = self.PUNISHMENT_SPEAR_STAGGER_MS 
+
+        # Счетчик для расчета задержек
+        global_index = 0
+
+        # --- 1. ЛЕВАЯ СТОРОНА (Летят ВПРАВО) ---
+        X_LEFT = center_x - self.PUNISHMENT_SPEAR_SIDE_OFFSET
+        
+        for i in range(SPEARS_PER_SIDE):
+            pos = pygame.math.Vector2(X_LEFT, start_y + i * self.PUNISHMENT_SPEAR_DISTANCE)
+            direction = pygame.math.Vector2(1, 0) # Строго вправо
+            
+            # Расчет таймингов:
+            # 1. Начало появления: Базовая задержка + Очередь * Интервал
+            appear_delay = self.PUNISHMENT_SPEAR_DELAY_MS + global_index * self.PUNISHMENT_SPEAR_STAGGER_MS
+            
+            # 2. Выстрел: Сразу после того, как оно появилось (через APPEAR_TIME)
+            # Это совпадает с моментом начала появления следующего копья.
+            launch_delay = appear_delay + APPEAR_TIME
+            
+            AngelSpearProjectile(
+                pos=pos, 
+                direction=direction, 
+                P_target=self.fixed_target_pos, # (не используется при прямом полете, но нужен для инита)
+                custom_travel_time_ms=self.FIXED_FLIGHT_TIME_MS, 
+                mist_duration=0, 
+                groups=all_sprites, 
+                launch_delay_ms=launch_delay,
+                appearance_delay_ms=appear_delay
+            )
+            global_index += 1
+
+        # --- 2. ПРАВАЯ СТОРОНА (Летят ВЛЕВО) ---
+        X_RIGHT = center_x + self.PUNISHMENT_SPEAR_SIDE_OFFSET
+        
+        for i in range(SPEARS_PER_SIDE):
+            pos = pygame.math.Vector2(X_RIGHT, start_y + i * self.PUNISHMENT_SPEAR_DISTANCE)
+            direction = pygame.math.Vector2(-1, 0) # Строго влево
+            
+            appear_delay = self.PUNISHMENT_SPEAR_DELAY_MS + global_index * self.PUNISHMENT_SPEAR_STAGGER_MS
+            launch_delay = appear_delay + APPEAR_TIME
+            
+            AngelSpearProjectile(
+                pos=pos, 
+                direction=direction, 
+                P_target=self.fixed_target_pos, 
+                custom_travel_time_ms=self.FIXED_FLIGHT_TIME_MS, 
+                mist_duration=0, 
+                groups=all_sprites, 
+                launch_delay_ms=launch_delay,
+                appearance_delay_ms=appear_delay
+            )
+            global_index += 1
 
     def start_final_chaos_attack(self):
         """Запускает финальную, смертельную атаку."""
