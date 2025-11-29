@@ -63,10 +63,10 @@ class ArchangelBoss(pygame.sprite.Sprite):
     SHIELD_COOLDOWN = 120 
 
     # --- КОНСТАНТЫ ДЛЯ НОВОЙ АТАКИ (Копья Наказания) ---
-    PUNISHMENT_SPEAR_DELAY_MS = 500    # Начальная задержка перед всем паттерном
-    PUNISHMENT_SPEAR_SIDE_OFFSET = 200 # Смещение вбок от игрока
-    PUNISHMENT_SPEAR_DISTANCE = 50     # Расстояние между копьями (УВЕЛИЧЕНО до 50)
-    PUNISHMENT_SPEAR_STAGGER_MS = 200  # Интервал между копьями (ритм атаки)
+    PUNISHMENT_SPEAR_DELAY_MS = 500    # Задержка перед началом полета копья (пока оно "проявляется")
+    PUNISHMENT_SPEAR_SIDE_OFFSET = 300 # Насколько далеко от игрока появляются ряды (слева и справа)
+    PUNISHMENT_SPEAR_DISTANCE = 60     # Расстояние между копьями по вертикали
+    PUNISHMENT_SPEAR_STAGGER_MS = 100  # Интервал появления между соседними копьями (каскад)
   
     # --- КОНСТАНТЫ МОБИЛЬНОСТИ (ФАЗА 2) ---
     DASH_COOLDOWN = 210 
@@ -114,8 +114,8 @@ class ArchangelBoss(pygame.sprite.Sprite):
         
         self.image = pygame.Surface((0, 0)) # Невидима
         
-        self.hp = 2000
-        self.max_hp = 2000
+        self.hp = 3000
+        self.max_hp = 3000
         self.time_ticks = 0
         
         self.arena_center = pygame.math.Vector2(WIDTH/2, HEIGHT/2)
@@ -311,7 +311,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
         # ФИНАЛЬНАЯ АТАКА (< 250 HP)
         if self.is_phase_two and not self.final_attack_triggered and self.state != self.STATE_PHASE_TRANSITION:
-            if self.hp < 250:
+            if self.hp < 350:
                 self.start_final_chaos_attack()
 
         # Важно: держать крылья открытыми во второй фазе
@@ -355,7 +355,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
                 
                 # --- ИЗМЕНЕНИЕ: ПЕРЕХОД В АТАКУ ЩИТОМ ---
                 # Вместо HOVER сразу бьем щитом
-                self.shield_scale_mult = 1.5 # В 1.5 раза больше
+                self.shield_scale_mult = 1.2 # В 1.5 раза больше
                 self.set_state(self.STATE_SHIELD_ATTACK)
                 # ----------------------------------------
         
@@ -460,8 +460,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
                     self.start_smite_attack(factor) 
                 else: # cycle == 2
                     self.set_state(self.STATE_PREPARE_PUNISHMENT_SPEARS)
-                    # Спецэффекты для этой атаки (появление копий) 
-                    # запускаются внутри логики этого состояния, здесь ничего звать не нужно.
+                    # Спецэффекты запускаются внутри логики этого состояния
                 
                 self.attack_counter += 1
 
@@ -498,19 +497,20 @@ class ArchangelBoss(pygame.sprite.Sprite):
             full_state_duration = int(self.PREPARE_DURATION * factor)
             self.spear_animation_progress = self.state_timer / full_state_duration 
             
+            if self.state_timer == 1:
+                 # В первый кадр фиксируем цель (игрока)
+                 self.fixed_target_pos = self.player.pos.copy()
+
             if self.state_timer >= full_state_duration:
-                # Спавним копья - они появятся и будут висеть 1 секунду
+                # Спавним копья - они появятся и сами полетят благодаря логике AngelSpearProjectile
                 self.spawn_punishment_spears()
                 
-                # Переходим в LAUNCH_SPEAR для завершающей анимации босса (45 кадров)
+                # Переходим в LAUNCH_SPEAR просто для завершающей анимации рук босса
                 self.set_state(self.STATE_LAUNCH_SPEAR) 
                 self.state_timer = 0
                 
-                # Устанавливаем кулдаун, равный времени полета копья + небольшой буфер
-                # Время полета: Задержка (1000мс) + Полет (500мс) + Буфер (~200мс) = 1700мс
-                # Переводим в кадры: 1700 / (1000/FPS) ~ 102 кадра (при 60 FPS)
-                cooldown_frames = int((self.PUNISHMENT_SPEAR_DELAY_MS + self.FIXED_FLIGHT_TIME_MS + 200) * (FPS / 1000))
-                self.cooldown_timer = cooldown_frames
+                # Устанавливаем кулдаун чуть больше, так как атака сложная
+                self.cooldown_timer = int(self.COOLDOWN_DURATION * 1.5 * factor)
 
         elif self.state == self.STATE_LAUNCH_SPEAR:
             dur = int(self.LAUNCH_DURATION * factor) # <-- Здесь переменная называется dur
@@ -618,30 +618,34 @@ class ArchangelBoss(pygame.sprite.Sprite):
 
     def spawn_punishment_spears(self):
         """
-        Спавнит 8 копий (4 слева, 4 справа) вокруг ИГРОКА.
-        Копья появляются по очереди и выстреливают сразу после появления следующего.
+        Спавнит копии вокруг зафиксированной позиции.
+        Фаза 1: 8 копий, медленный ритм, увеличенная задержка.
+        Фаза 2: 12 копий, быстрый ритм.
         """
-        # 1. Фиксируем позицию цели (Игрока)
-        # Если это первый кадр атаки, fixed_target_pos сбрасывается в (0,0) в update_state_logic,
-        # поэтому здесь мы захватываем актуальную позицию игрока.
-        if self.fixed_target_pos.length_squared() == 0: 
-            self.fixed_target_pos = self.player.pos.copy()
+        # --- НАСТРОЙКИ ФАЗЫ ---
+        if self.is_phase_two:
+            SPEARS_PER_SIDE = 6  # 12 копий всего
+            current_stagger = self.PUNISHMENT_SPEAR_STAGGER_MS # Обычный ритм
+            base_delay = self.PUNISHMENT_SPEAR_DELAY_MS         # Обычная задержка
+        else:
+            SPEARS_PER_SIDE = 4  # 8 копий всего
+            current_stagger = self.PUNISHMENT_SPEAR_STAGGER_MS * 2 # Медленный ритм (x2)
+            # Увеличиваем начальную задержку в 1.5 раза для первой фазы
+            base_delay = int(self.PUNISHMENT_SPEAR_DELAY_MS * 2)
+
+        # Цель зафиксирована в fixed_target_pos
+        if self.fixed_target_pos.length_squared() == 0:
+             self.fixed_target_pos = self.player.pos.copy()
 
         center_x = self.fixed_target_pos.x
         center_y = self.fixed_target_pos.y
-
-        # Количество копий с каждой стороны
-        SPEARS_PER_SIDE = 4
         
         # Общая высота построения (чтобы центрировать по вертикали относительно игрока)
         total_height = SPEARS_PER_SIDE * self.PUNISHMENT_SPEAR_DISTANCE
         start_y = center_y - (total_height / 2) + (self.PUNISHMENT_SPEAR_DISTANCE / 2)
 
-        # Тайминг проявления копья (совпадает с интервалом, чтобы было бесшовно)
-        APPEAR_TIME = self.PUNISHMENT_SPEAR_STAGGER_MS 
-
-        # Счетчик для расчета задержек
-        global_index = 0
+        # Время полета (копья пролетят быстро)
+        FLIGHT_TIME = 600 # мс
 
         # --- 1. ЛЕВАЯ СТОРОНА (Летят ВПРАВО) ---
         X_LEFT = center_x - self.PUNISHMENT_SPEAR_SIDE_OFFSET
@@ -649,26 +653,23 @@ class ArchangelBoss(pygame.sprite.Sprite):
         for i in range(SPEARS_PER_SIDE):
             pos = pygame.math.Vector2(X_LEFT, start_y + i * self.PUNISHMENT_SPEAR_DISTANCE)
             direction = pygame.math.Vector2(1, 0) # Строго вправо
+            target = pos + direction * 1500 
             
-            # Расчет таймингов:
-            # 1. Начало появления: Базовая задержка + Очередь * Интервал
-            appear_delay = self.PUNISHMENT_SPEAR_DELAY_MS + global_index * self.PUNISHMENT_SPEAR_STAGGER_MS
+            delay = base_delay + i * current_stagger
             
-            # 2. Выстрел: Сразу после того, как оно появилось (через APPEAR_TIME)
-            # Это совпадает с моментом начала появления следующего копья.
-            launch_delay = appear_delay + APPEAR_TIME
-            
-            AngelSpearProjectile(
+            # Создаем копье и сохраняем в переменную
+            spear = AngelSpearProjectile(
                 pos=pos, 
                 direction=direction, 
-                P_target=self.fixed_target_pos, # (не используется при прямом полете, но нужен для инита)
-                custom_travel_time_ms=self.FIXED_FLIGHT_TIME_MS, 
-                mist_duration=0, 
-                groups=all_sprites, 
-                launch_delay_ms=launch_delay,
-                appearance_delay_ms=appear_delay
+                P_target=target,
+                custom_travel_time_ms=FLIGHT_TIME, 
+                mist_duration=delay, 
+                groups=all_sprites
             )
-            global_index += 1
+            # !!! РУЧНОЕ УВЕЛИЧЕНИЕ ХИТБОКСА !!!
+            # Было 20x20, стало 50x50. Теперь попасть намного легче.
+            spear.collision_rect = pygame.Rect(0, 0, 50, 50)
+            spear.collision_rect.center = pos # Обновляем центр после изменения размера
 
         # --- 2. ПРАВАЯ СТОРОНА (Летят ВЛЕВО) ---
         X_RIGHT = center_x + self.PUNISHMENT_SPEAR_SIDE_OFFSET
@@ -676,21 +677,21 @@ class ArchangelBoss(pygame.sprite.Sprite):
         for i in range(SPEARS_PER_SIDE):
             pos = pygame.math.Vector2(X_RIGHT, start_y + i * self.PUNISHMENT_SPEAR_DISTANCE)
             direction = pygame.math.Vector2(-1, 0) # Строго влево
+            target = pos + direction * 1500
             
-            appear_delay = self.PUNISHMENT_SPEAR_DELAY_MS + global_index * self.PUNISHMENT_SPEAR_STAGGER_MS
-            launch_delay = appear_delay + APPEAR_TIME
+            delay = base_delay + i * current_stagger
             
-            AngelSpearProjectile(
+            spear = AngelSpearProjectile(
                 pos=pos, 
                 direction=direction, 
-                P_target=self.fixed_target_pos, 
-                custom_travel_time_ms=self.FIXED_FLIGHT_TIME_MS, 
-                mist_duration=0, 
-                groups=all_sprites, 
-                launch_delay_ms=launch_delay,
-                appearance_delay_ms=appear_delay
+                P_target=target,
+                custom_travel_time_ms=FLIGHT_TIME, 
+                mist_duration=delay, 
+                groups=all_sprites
             )
-            global_index += 1
+            # !!! УВЕЛИЧЕНИЕ ХИТБОКСА !!!
+            spear.collision_rect = pygame.Rect(0, 0, 50, 50)
+            spear.collision_rect.center = pos
 
     def start_final_chaos_attack(self):
         """Запускает финальную, смертельную атаку."""
@@ -790,7 +791,7 @@ class ArchangelBoss(pygame.sprite.Sprite):
             else: # RANDOM (Старая логика)
                 # Кольцо вокруг центра арены
                 angle = random.uniform(0, math.pi * 2)
-                dist = random.uniform(420, self.MOVEMENT_RADIUS) 
+                dist = random.uniform(600, self.MOVEMENT_RADIUS) 
                 offset = pygame.math.Vector2(math.cos(angle), math.sin(angle)) * dist
                 candidate = self.arena_center + offset
 

@@ -511,3 +511,55 @@ def draw_dash_icon(screen, player_obj, pos, font):
 
     # 5. Рамка (Поверх всего)
     pygame.draw.rect(screen, border_color, rect, 2)
+
+
+# Добавьте в конец файла rendering/ui_render.py
+
+def draw_dagger_icon(screen, skill_obj, pos, font):
+    """Иконка для скилла с кинжалами (на клавишу Q)."""
+    x, y = pos
+    size = 50
+    
+    # Цвета (Голубые/Призрачные)
+    C_BG = (10, 20, 30)
+    C_BORDER_READY = (100, 255, 255)
+    C_BORDER_CD = (50, 80, 80)
+    C_CD_OVERLAY = (0, 0, 0, 180)
+    
+    rect = pygame.Rect(x, y, size, size)
+    pygame.draw.rect(screen, C_BG, rect)
+    
+    # Рисуем 3 кинжала схематично
+    center = (x + size//2, y + size//2)
+    # Центральный
+    pygame.draw.line(screen, (200, 255, 255), (center[0], center[1]+15), (center[0], center[1]-15), 3)
+    # Левый
+    pygame.draw.line(screen, (150, 200, 255), (center[0]-10, center[1]+10), (center[0]-15, center[1]-10), 2)
+    # Правый
+    pygame.draw.line(screen, (150, 200, 255), (center[0]+10, center[1]+10), (center[0]+15, center[1]-10), 2)
+    
+    # Клавиша "Q"
+    key_surf = font.render("Q", True, (255, 255, 255))
+    screen.blit(key_surf, (x + 4, y + 2))
+    
+    # Логика Кулдауна
+    current_time = pygame.time.get_ticks()
+    time_left = max(0, skill_obj.cooldown - (current_time - skill_obj.timer))
+    
+    if time_left > 0:
+        cd_pct = time_left / skill_obj.cooldown
+        h_cd = int(size * cd_pct)
+        s = pygame.Surface((size, h_cd), pygame.SRCALPHA)
+        s.fill(C_CD_OVERLAY)
+        screen.blit(s, (x, y + size - h_cd))
+        
+        seconds = time_left / 1000.0
+        txt = f"{int(seconds + 0.9)}"
+        txt_surf = font.render(txt, True, (255, 255, 255))
+        txt_rect = txt_surf.get_rect(center=(x + size/2, y + size/2))
+        screen.blit(txt_surf, txt_rect)
+        border_color = C_BORDER_CD
+    else:
+        border_color = C_BORDER_READY
+        
+    pygame.draw.rect(screen, border_color, rect, 2)

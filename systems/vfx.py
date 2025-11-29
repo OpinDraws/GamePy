@@ -424,3 +424,48 @@ class GhostMistVFX(pygame.sprite.Sprite):
 
             draw_alpha_circle(surface, self.color_base[:3] + (layer_alpha_base,), draw_pos + layer_jitter_offset, layer_size)
             draw_alpha_circle(surface, self.color_glow[:3] + (layer_alpha_glow,), draw_pos + layer_jitter_offset * 0.5, layer_size * 0.7)
+
+# Добавьте этот класс в конец файла systems/vfx.py
+
+class CloudSummonVFX(pygame.sprite.Sprite):
+    def __init__(self, pos, duration_ms):
+        super().__init__()
+        particles.add(self)
+        all_sprites.add(self)
+        self.pos = pygame.math.Vector2(pos)
+        self.duration = duration_ms
+        self.spawn_time = pygame.time.get_ticks()
+        self.image = pygame.Surface((1, 1)) # Невидимый, рисуем в draw_custom
+        self.rect = self.image.get_rect(center=pos)
+        
+    def update(self, dt):
+        if pygame.time.get_ticks() - self.spawn_time > self.duration:
+            self.kill()
+            
+    def draw_custom(self, surface, offset):
+        draw_pos = self.pos + offset
+        elapsed = pygame.time.get_ticks() - self.spawn_time
+        
+        # ИСПРАВЛЕНИЕ 1: Прогресс не может быть больше 1.0
+        progress = min(1.0, elapsed / self.duration)
+        
+        # Круг сжимается перед выстрелом
+        radius = 40 * (1.0 - progress * 0.5) 
+        
+        # ИСПРАВЛЕНИЕ 2: Альфа не может быть меньше 0
+        alpha = max(0, int(150 * (1.0 - progress)))
+        
+        # Вращающиеся частицы (имитация)
+        for i in range(5):
+            angle = (pygame.time.get_ticks() * 0.01) + (i * 72)
+            ox = math.cos(angle) * 20
+            oy = math.sin(angle) * 20
+            p = draw_pos + pygame.math.Vector2(ox, oy)
+            
+            # ИСПРАВЛЕНИЕ 3: Рисуем, только если цвет валидный (альфа > 0)
+            if alpha > 0:
+                draw_alpha_circle(surface, (200, 255, 255, alpha), p, radius * 0.5)
+            
+        # Для центрального круга тоже нужна проверка, но draw_alpha_circle внутри имеет проверки
+        # Однако лучше передавать валидный цвет
+        draw_alpha_circle(surface, (100, 200, 255, 100), draw_pos, radius)

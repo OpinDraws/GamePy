@@ -220,9 +220,17 @@ class Player(pygame.sprite.Sprite):
             alpha_mult
         )
 
-    def input(self):
+    def input(self, camera_offset): # <-- Добавлен аргумент
         keys = pygame.key.get_pressed()
-        self.skill_manager.handle_input(keys)
+        
+        # Вычисляем позицию мыши в МИРЕ для скилла
+        mx, my = pygame.mouse.get_pos()
+        # Мировая = Экранная - Оффсет (оффсет обычно отрицательный, поэтому вычитание работает как сложение инвертированного)
+        # Но в камере offset = (target - world), значит World = Screen - Offset
+        mouse_world_pos = (mx - camera_offset.x, my - camera_offset.y)
+        
+        # Передаем позицию мыши в менеджер скиллов
+        self.skill_manager.handle_input(keys, mouse_world_pos)
         
         if self.hp <= 0: 
             self.vel = pygame.math.Vector2(0, 0)
@@ -239,7 +247,7 @@ class Player(pygame.sprite.Sprite):
             self.vel += direction * self.acc
             
             if not self.can_shoot:
-                self.vel *= 0.8 
+                self.vel *= 0.88 
             
             if keys[pygame.K_SPACE] and self.can_dash: 
                 self.dash(direction)
@@ -288,7 +296,8 @@ class Player(pygame.sprite.Sprite):
         self.bullet_group_ref = bullet_group
         self.all_sprites_ref = all_sprites_group
         
-        self.input()
+        self.input(camera_offset) # <-- Передаем camera_offset сюда
+        
         self.update_invulnerability() 
         # Передаем camera_offset в метод расчета угла
         self.angle = self.get_mouse_angle(camera_offset) 

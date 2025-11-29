@@ -22,8 +22,10 @@ from rendering.ui_render import (
     draw_boss_hud_new, 
     draw_player_hud, 
     draw_skill_icon, 
-    draw_dash_icon
+    draw_dash_icon,
+    draw_dagger_icon
 )
+
 from rendering.archangel_render import draw_archangel_boss
 from rendering.portal_render import draw_divine_portal
 
@@ -111,7 +113,7 @@ class GameScene(Scene):
         # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ
         
         # Монстр 1 (Слева)
-        pos_m1 = self.player.pos + pygame.math.Vector2(-250, 100) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
+        pos_m1 = self.player.pos + pygame.math.Vector2(-350, 200) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
         m1 = TentacleEnemy(
             pos_m1, 
             self.player, 
@@ -125,7 +127,7 @@ class GameScene(Scene):
         m1.attention_timer = -99999 
 
         # Монстр 2 (Справа)
-        pos_m2 = self.player.pos + pygame.math.Vector2(0, 300) # Чуть отодвинул (150)
+        pos_m2 = self.player.pos + pygame.math.Vector2(0, 400) # Чуть отодвинул (150)
         m3 = TentacleEnemy(
             pos_m2, 
             self.player, 
@@ -137,7 +139,7 @@ class GameScene(Scene):
         # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
         m3.attention_state = 'FOCUS'
         m3.attention_timer = -99999
-        pos_m3 = self.player.pos + pygame.math.Vector2(250, 100) # Чуть отодвинул (150)
+        pos_m3 = self.player.pos + pygame.math.Vector2(350, 200) # Чуть отодвинул (150)
         m3 = TentacleEnemy(
             pos_m3, 
             self.player, 
@@ -332,8 +334,16 @@ class GameScene(Scene):
         
         skill_x = 20
         skill_y = 20 + 80 + 10 
+        
+        # E - Flurry
         draw_skill_icon(screen, self.player.skill_manager.skills['flurry'], (skill_x, skill_y), self.assets.get_font_ui())
-        draw_dash_icon(screen, self.player, (skill_x + 60, skill_y), self.assets.get_font_ui())
+        
+        # Q - Cloud Daggers (НОВОЕ)
+        draw_dagger_icon(screen, self.player.skill_manager.skills['cloud'], (skill_x + 60, skill_y), self.assets.get_font_ui())
+        
+        # Space - Dash (Сдвигаем правее)
+        draw_dash_icon(screen, self.player, (skill_x + 120, skill_y), self.assets.get_font_ui())
+        
         
         for sprite in particles:
             if hasattr(sprite, 'draw_custom'):

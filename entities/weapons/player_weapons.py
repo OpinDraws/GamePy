@@ -14,7 +14,7 @@ class SlashProjectile(pygame.sprite.Sprite):
         
         self.max_distance = 500
         self.distance_traveled = 0
-        self.damage = 12 
+        self.damage = 18 
         
         self.is_fading = False
         self.fade_duration = 150 
@@ -81,3 +81,50 @@ class SlashProjectile(pygame.sprite.Sprite):
     def create_impact_vfx(self):
         for _ in range(5):
             Particle(self.pos, self.particle_groups, color=(255, 50, 50), speed=6, decay=15)
+
+
+class PhantomDagger(pygame.sprite.Sprite):
+    def __init__(self, pos, direction, groups, particle_groups):
+        super().__init__(groups)
+        self.pos = pygame.math.Vector2(pos)
+        self.speed = 28
+        self.vel = direction.normalize() * self.speed
+        self.particle_groups = particle_groups
+        
+        self.damage = 45  # <--- ИЗМЕНЕНО: Было 60, стало 45
+        self.max_distance = 900
+        self.distance_traveled = 0
+        
+        # Визуал: Тонкий голубой кинжал
+        self.angle = math.degrees(math.atan2(-direction.y, direction.x))
+        self.image = pygame.Surface((40, 10), pygame.SRCALPHA)
+        
+        # Рисуем кинжал
+        pygame.draw.polygon(self.image, (200, 255, 255), [(0, 5), (30, 2), (40, 5), (30, 8)]) # Лезвие
+        pygame.draw.circle(self.image, (100, 200, 255), (5, 5), 4) # Рукоять
+        
+        self.image = pygame.transform.rotate(self.image, self.angle)
+        self.rect = self.image.get_rect(center=self.pos)
+        
+        # Хитбокс
+        self.hitboxes = [{'type': 'circle', 'center': self.pos, 'radius': 10}]
+
+    def update(self, dt):
+        self.pos += self.vel * dt * 60
+        self.distance_traveled += self.speed * dt * 60
+        self.rect.center = self.pos
+        
+        # Обновляем хитбокс
+        self.hitboxes[0]['center'] = (self.pos.x, self.pos.y)
+
+        # След (Трейл)
+        if random.random() < 0.3:
+            Particle(self.pos, self.particle_groups, color=(100, 255, 255), speed=0, decay=20, scale_speed=0.5)
+
+        if self.distance_traveled >= self.max_distance:
+            self.kill()
+
+    def create_impact_vfx(self):
+        # Эффект при попадании (голубые искры)
+        for _ in range(8):
+            Particle(self.pos, self.particle_groups, color=(150, 255, 255), speed=5, decay=10)
