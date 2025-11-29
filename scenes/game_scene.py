@@ -15,6 +15,7 @@ from entities.player import Player
 from entities.bosses.archangel_boss import ArchangelBoss
 from entities.gate import Gate
 from entities.tentacle_enemy import TentacleEnemy
+from entities.brain_enemy import BrainEnemy
 
 from systems.vfx import ScreenShake
 from rendering.background import generate_cave_background
@@ -111,6 +112,18 @@ class GameScene(Scene):
         
         
         # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ
+
+        # ... после создания m1, m2, m3 ...
+
+# Тестовый спавн Мозгового Монстра
+        brain_pos = self.player.pos + pygame.math.Vector2(0, -300)
+        BrainEnemy(
+           brain_pos,
+          self.player,
+          [all_sprites, enemies],
+          [all_sprites, particles],
+           self.screen_shake.shake
+        )
         
         # Монстр 1 (Слева)
         pos_m1 = self.player.pos + pygame.math.Vector2(-350, 200) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
