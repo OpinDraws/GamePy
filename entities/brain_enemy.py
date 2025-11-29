@@ -6,6 +6,7 @@ from entities.base_enemy import BaseEnemy
 from rendering.brain_monsters import draw_brain_monster
 from systems.vfx import Particle, TelekineticSpike # <-- Импортируем новый класс
 import math
+from core.asset_manager import AssetManager
 
 class BrainEnemy(BaseEnemy):
     def __init__(self, pos, player, groups, particle_groups, shake_func):
@@ -104,7 +105,6 @@ class BrainEnemy(BaseEnemy):
         # Правый шип (будет наклонен влево, к игроку)
         pos_right = player_pos + pygame.math.Vector2(side_offset, random.randint(-10, 10))
         TelekineticSpike(pos_right, self.spike_damage, self.player)
-            
         # Эффект каста на самом монстре
         for _ in range(10):
             Particle(self.pos, self.particle_groups, color=(150, 0, 200), speed=3, decay=5)

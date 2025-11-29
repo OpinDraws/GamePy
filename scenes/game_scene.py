@@ -178,7 +178,8 @@ class GameScene(Scene):
 
     def enter(self):
         print("Сцена игры: Старт")
-        # Музыка теперь запускается в update
+        # Запускаем фоновую музыку подземелья с плавным входом (например, 2 сек)
+        self.assets.play_music('dungeon', fade_ms=2000)
         
     def on_player_death(self):
         if not self.game_over:
@@ -254,7 +255,8 @@ class GameScene(Scene):
             
             # Запускаем интро
             self.boss.spawn_boss()
-            self.assets.play_music()
+            self.assets.stop_music(fade_ms=600)
+            self.assets.play_music('boss', fade_ms=600)
 
     def check_collisions(self):
         hits = pygame.sprite.groupcollide(enemies, bullets, False, True, complex_collision_check)

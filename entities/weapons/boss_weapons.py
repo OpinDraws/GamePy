@@ -3,7 +3,7 @@ import math
 import random
 from core.config import all_sprites, enemies
 from rendering.archangel_render import draw_spear_projectile
-
+from core.asset_manager import AssetManager
 # --- ЦВЕТА ДЛЯ МАГИИ ---
 C_MAGIC_CORE = (255, 255, 255)
 C_MAGIC_GLOW = (255, 50, 100, 200) 
@@ -57,6 +57,7 @@ class AngelSpearProjectile(pygame.sprite.Sprite):
     def activate_flight(self):
         self.is_active_projectile = True
         self.time_since_activation = 0
+        AssetManager().play_sound('boss_spear')
 
     def update(self, dt):
         dt_ms = dt * 1000

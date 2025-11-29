@@ -1,6 +1,7 @@
 import pygame
 import random
 import math
+from core.asset_manager import AssetManager
 from core.config import (
     all_sprites, particles, 
     COLOR_PARTICLE, COLOR_VAMPIRE_SKIN, 
@@ -514,6 +515,7 @@ class TelekineticSpike(pygame.sprite.Sprite):
 
     def strike(self):
         self.has_hit = True
+        AssetManager().play_sound('brain_spike')
         if hasattr(self.player, 'shake_func'):
             self.player.shake_func(5)
             

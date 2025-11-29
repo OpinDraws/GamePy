@@ -7,6 +7,7 @@ from core.config import WIDTH, HEIGHT, all_sprites, enemies, FPS
 from entities.weapons.boss_weapons import AngelSpearProjectile 
 from rendering.archangel_render import draw_archangel_boss
 from systems.vfx import GhostMistVFX, CelestialSmiteVFX, ShieldWaveVFX, ChaosRiftVFX
+from core.asset_manager import AssetManager
 
 class ArchangelBoss(pygame.sprite.Sprite):
     # --- Состояния машины ---
@@ -907,8 +908,26 @@ class ArchangelBoss(pygame.sprite.Sprite):
             self.phantom_spears.append(spear)
 
     def activate_spears_flight(self):
-        for spear in self.phantom_spears:
-            spear.activate_flight() 
+        """
+        Запускает веер копий.
+        Теперь добавляем небольшую задержку между копьями, 
+        чтобы звуки не сливались и атака выглядела как очередь.
+        """
+        # Сортируем копья слева направо по X, чтобы очередь шла красиво
+        self.phantom_spears.sort(key=lambda s: s.pos.x)
+
+        for i, spear in enumerate(self.phantom_spears):
+            # Вместо мгновенного запуска, ставим задержку
+            # i * 60 мс = каждое следующее копье летит через 0.06 сек после предыдущего
+            delay = i * 60
+            
+            spear.launch_delay_ms = delay
+            spear.time_until_launch = delay
+            
+            # Важно: Не вызываем spear.activate_flight() здесь!
+            # Метод update() внутри копья сам вызовет activate_flight(),
+            # когда таймер time_until_launch истечет.
+            
         self.phantom_spears = [] 
         self.vfx_mist_active = False 
         self.fixed_target_pos = pygame.math.Vector2(0, 0)

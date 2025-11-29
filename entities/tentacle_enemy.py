@@ -4,6 +4,7 @@ import random
 from core.config import *
 from entities.base_enemy import BaseEnemy
 from rendering.monsters import draw_procedural_monster_v2
+from core.asset_manager import AssetManager
 
 class TentacleEnemy(BaseEnemy):
     # ... (Константы состояний STATE_... те же) ...
@@ -261,6 +262,7 @@ class TentacleEnemy(BaseEnemy):
             
             if self.state_timer <= 0:
                 self.state = self.STATE_LUNGE
+                AssetManager().play_sound('tentacle_lunge')
                 self.damage_dealt = False
                 jump_vec = self.lunge_target_pos - self.pos
                 if jump_vec.length() > 0: 
@@ -350,6 +352,7 @@ class TentacleEnemy(BaseEnemy):
         self.state = self.STATE_STRIKE_LIFT
         self.state_timer = 0
         self.damage_dealt = False
+        AssetManager().play_sound('tentacle_strike')
         if is_boosted:
             self.current_hit_time = int(self.BASE_TIME_HIT * 0.7) 
             self.current_lift_time = int(self.BASE_TIME_LIFT * 0.8) 
