@@ -469,3 +469,98 @@ class CloudSummonVFX(pygame.sprite.Sprite):
         # Для центрального круга тоже нужна проверка, но draw_alpha_circle внутри имеет проверки
         # Однако лучше передавать валидный цвет
         draw_alpha_circle(surface, (100, 200, 255, 100), draw_pos, radius)
+
+
+class TelekineticSpike(pygame.sprite.Sprite):
+    def __init__(self, pos, damage, player):
+        super().__init__()
+        all_sprites.add(self)
+        particles.add(self) 
+        
+        self.pos = pygame.math.Vector2(pos)
+        self.player = player
+        self.damage = damage
+        
+        self.DELAY_FRAMES = 60       
+        self.ACTIVE_DURATION = 20    
+        self.timer = 0
+        
+        self.has_hit = False
+        self.radius = 35             
+        
+        self.image = pygame.Surface((1, 1))
+        self.rect = self.image.get_rect(center=self.pos)
+
+        # --- НОВОЕ: ВЫЧИСЛЕНИЕ НАКЛОНА ---
+        # Вектор от шипа к игроку (только по X, чтобы шип наклонялся вбок)
+        # Если хотите наклон точно на игрока (включая Y), уберите .x и используйте полный вектор
+        dx = self.player.pos.x - self.pos.x
+        dy = self.player.pos.y - self.pos.y
+        # Нормализуем, но сохраняем направление
+        dist = math.sqrt(dx*dx + dy*dy)
+        if dist > 0:
+            self.slant_dir = pygame.math.Vector2(dx/dist, dy/dist)
+        else:
+            self.slant_dir = pygame.math.Vector2(0, 0)
+
+    def update(self, dt):
+        self.timer += 1
+        
+        if self.timer == self.DELAY_FRAMES:
+            self.strike()
+            
+        if self.timer >= self.DELAY_FRAMES + self.ACTIVE_DURATION:
+            self.kill()
+
+    def strike(self):
+        self.has_hit = True
+        if hasattr(self.player, 'shake_func'):
+            self.player.shake_func(5)
+            
+        dist = self.pos.distance_to(self.player.pos)
+        hit_dist = self.radius + getattr(self.player, 'radius', 15)
+        
+        if dist < hit_dist:
+            self.player.take_damage(self.damage)
+
+    def draw_custom(self, surface, offset):
+        draw_pos = self.pos + offset
+        
+        C_WARN = (100, 0, 100)
+        C_WARN_INNER = (200, 50, 200)
+        C_SPIKE = (80, 20, 90)
+        C_SPIKE_LIGHT = (200, 100, 255)
+        
+        # ФАЗА 1: ПРЕДУПРЕЖДЕНИЕ
+        if self.timer < self.DELAY_FRAMES:
+            progress = self.timer / self.DELAY_FRAMES
+            r_outer = self.radius * (1.5 - 0.5 * progress)
+            alpha_outer = int(100 * progress)
+            draw_alpha_circle(surface, (*C_WARN, alpha_outer), draw_pos, r_outer)
+            r_inner = self.radius * progress
+            draw_alpha_circle(surface, (*C_WARN_INNER, 100), draw_pos, r_inner)
+            pygame.draw.circle(surface, (255, 100, 255), (int(draw_pos.x), int(draw_pos.y)), self.radius, 1)
+
+        # ФАЗА 2: УДАР (ДИАГОНАЛЬНЫЙ ШИП)
+        else:
+            anim_progress = (self.timer - self.DELAY_FRAMES) / self.ACTIVE_DURATION
+            alpha = int(255 * (1 - anim_progress))
+            
+            if alpha > 0:
+                spike_height = 140
+                spike_half_w = 15
+                slant_strength = 60 # Насколько сильно наклоняется верхушка
+                
+                # Основание (на земле)
+                p_base_center = draw_pos
+                p_left = (draw_pos.x - spike_half_w, draw_pos.y)
+                p_right = (draw_pos.x + spike_half_w, draw_pos.y)
+                
+                # Вершина (смещена по вектору наклона)
+                # Шип растет вверх (-Y) и смещается в сторону игрока (slant_dir)
+                tip_offset = self.slant_dir * slant_strength
+                p_top = (draw_pos.x + tip_offset.x, draw_pos.y - spike_height + tip_offset.y)
+                
+                # Рисуем
+                draw_alpha_polygon(surface, (*C_SPIKE, alpha), [p_top, p_left, p_right])
+                draw_alpha_polygon(surface, (*C_SPIKE_LIGHT, alpha), [p_top, p_base_center, p_right])
