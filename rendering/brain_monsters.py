@@ -200,7 +200,7 @@ def draw_brain_monster(surface, pos, time_tick, look_target_pos, brain_img=None)
         # Картинка уже должна быть отмасштабирована при загрузке
         brain_x = x + body_sway - (brain_img.get_width() / 2)
         # Смещение мозга вверх от обода
-        brain_y = head_y - (40 * S) 
+        brain_y = head_y - (50 * S) 
         surface.blit(brain_img, (brain_x, brain_y))
     else:
         # Заглушка тоже масштабируется

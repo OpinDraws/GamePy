@@ -4,7 +4,7 @@ import os
 from core.config import *
 from entities.base_enemy import BaseEnemy
 from rendering.brain_monsters import draw_brain_monster
-from systems.vfx import Particle, TelekineticSpike # <-- Импортируем новый класс
+from systems.vfx import Particle, TelekineticSpike 
 import math
 from core.asset_manager import AssetManager
 
@@ -12,23 +12,23 @@ class BrainEnemy(BaseEnemy):
     def __init__(self, pos, player, groups, particle_groups, shake_func):
         super().__init__(pos, player, groups, particle_groups, shake_func, health=400)
         
-        self.radius = 50 
+        self.radius = 25 
         self.time_ticks = random.randint(0, 1000)
         
         # --- ПАРАМЕТРЫ БАФФЕРА ---
         self.buff_range = 800       
-        self.buff_cooldown = 600    # 10 секунд
+        self.buff_cooldown = 600    
         self.buff_timer = 0
         self.buff_duration = 300    
         self.buff_speed_mult = 2.0
         self.buff_damage_mult = 1.5
         self.buff_cooldown_mult = 2.0 
 
-        # --- ПАРАМЕТРЫ АТАКИ ШИПАМИ (НОВОЕ) ---
-        self.spike_cooldown_max = 420  # 7 секунд (60 * 7)
-        self.spike_timer = random.randint(100, 300) # Случайный старт, чтобы не ударил сразу
+        # --- ПАРАМЕТРЫ АТАКИ ШИПАМИ ---
+        self.spike_cooldown_max = 420  
+        self.spike_timer = random.randint(100, 300) 
         self.spike_damage = 50
-        self.spike_range = 700 # Атакует, только если игрок ближе 700 пикселей
+        self.spike_range = 700 
         
         self.brain_img = None
         try:
@@ -44,40 +44,39 @@ class BrainEnemy(BaseEnemy):
         self.image = pygame.Surface((self.surface_size, self.surface_size), pygame.SRCALPHA)
         self.rect = self.image.get_rect(center=pos)
         self.visual_center = pygame.math.Vector2(self.surface_size // 2, self.surface_size // 2)
+        
+        # Инициализируем хитбоксы сразу
+        self.update_hitbox()
 
     def update(self, dt):
         self.time_ticks += 1
-        self.update_buffs()
-        self.soft_collision() 
         
-        # 1. Логика БАФФА (существующая)
-        if self.buff_timer > 0:
-            self.buff_timer -= 1
-        else:
-            if self.try_apply_buff():
-                self.buff_timer = self.buff_cooldown
+        # ОБЯЗАТЕЛЬНО: Обновляем позицию хитбокса каждый кадр
+        self.update_hitbox()
+        
+        if self.ai_active:
+            self.update_buffs()
+            self.soft_collision() 
+            
+            if self.buff_timer > 0:
+                self.buff_timer -= 1
+            else:
+                if self.try_apply_buff():
+                    self.buff_timer = self.buff_cooldown
 
-        # 2. Логика АТАКИ ШИПАМИ (НОВАЯ)
-        # Если на нас весит бафф на КД, шипы тоже откатываются быстрее
-        if self.spike_timer > 0:
-            self.spike_timer -= 1 * self.cooldown_mult 
-        else:
-            # Проверяем дистанцию до игрока
-            dist_to_player = self.pos.distance_to(self.player.pos)
-            if dist_to_player < self.spike_range:
-                self.attack_spikes()
-                self.spike_timer = self.spike_cooldown_max
+            if self.spike_timer > 0:
+                self.spike_timer -= 1 * self.cooldown_mult 
+            else:
+                dist_to_player = self.pos.distance_to(self.player.pos)
+                if dist_to_player < self.spike_range:
+                    self.attack_spikes()
+                    self.spike_timer = self.spike_cooldown_max
 
-        # Отрисовка
         self.image.fill((0,0,0,0))
         
-        # Индикатор готовности баффа (пульсирующий круг)
-        if self.buff_timer <= 0:
+        if self.buff_timer <= 0 and self.ai_active:
              pulse = (math.sin(self.time_ticks * 0.1) + 1) * 10
              pygame.draw.circle(self.image, (255, 100, 100, 50), self.visual_center, 60 + pulse, 2)
-
-        # Индикатор подготовки атаки (глаза светятся ярче перед ударом)
-        # Можно добавить позже, пока просто логика
 
         draw_pos_on_surface = (self.visual_center.x, self.visual_center.y + 80) 
         
@@ -91,25 +90,23 @@ class BrainEnemy(BaseEnemy):
         
         self.rect = self.image.get_rect(center=self.pos)
 
+    # ИЗМЕНЕНИЕ: Добавлен метод создания явного хитбокса
+    def update_hitbox(self):
+        self.hitboxes = [{'type': 'circle', 'center': (self.pos.x, self.pos.y), 'radius': self.radius}]
+
     def attack_spikes(self):
-        """Создает два шипа по бокам от игрока (диагональный удар)."""
         player_pos = self.player.pos
-        
-        # Смещение 90 пикселей влево и вправо
         side_offset = 90
         
-        # Левый шип (будет наклонен вправо, к игроку)
         pos_left = player_pos + pygame.math.Vector2(-side_offset, random.randint(-10, 10))
         TelekineticSpike(pos_left, self.spike_damage, self.player)
         
-        # Правый шип (будет наклонен влево, к игроку)
         pos_right = player_pos + pygame.math.Vector2(side_offset, random.randint(-10, 10))
         TelekineticSpike(pos_right, self.spike_damage, self.player)
-        # Эффект каста на самом монстре
+        
         for _ in range(10):
             Particle(self.pos, self.particle_groups, color=(150, 0, 200), speed=3, decay=5)
 
-    # ... (методы try_apply_buff и spawn_cast_vfx остаются без изменений) ...
     def try_apply_buff(self):
         best_target = None
         min_dist_to_player = float('inf')

@@ -7,7 +7,7 @@ from rendering.monsters import draw_procedural_monster_v2
 from core.asset_manager import AssetManager
 
 class TentacleEnemy(BaseEnemy):
-    # ... (Константы состояний STATE_... те же) ...
+    # ... (Константы состояний остаются без изменений) ...
     STATE_CHASE = 0
     STATE_PREPARE_LUNGE = 1
     STATE_LUNGE = 2
@@ -20,7 +20,7 @@ class TentacleEnemy(BaseEnemy):
     def __init__(self, pos, player, groups, particle_groups, shake_func):
         super().__init__(pos, player, groups, particle_groups, shake_func, health=150)
         
-        # ... (Инициализация архетипов и параметров без изменений) ...
+        # ... (Инициализация без изменений) ...
         self.archetype = random.choice(['bruiser', 'jumper', 'combo'])
         self.base_speed = 3.0 * random.uniform(0.9, 1.1)
         self.radius = 35 
@@ -87,7 +87,6 @@ class TentacleEnemy(BaseEnemy):
         self.cached_separation_force = pygame.math.Vector2(0, 0)
         self.SEPARATION_DIST = 200 
 
-        # Анимационные переменные
         self.scale = 0.5
         self.base_body_radius = 85 * self.scale
         self.visual_radius = self.base_body_radius
@@ -106,9 +105,7 @@ class TentacleEnemy(BaseEnemy):
         self.rect = self.image.get_rect(center=pos)
         self.visual_center = pygame.math.Vector2(self.surface_size // 2, self.surface_size // 2)
 
-    # ... (Методы _generate_chaotic_path и _update_separation_cache без изменений) ...
     def _generate_chaotic_path(self, target_pos):
-        # Код без изменений, можно оставить старый
         start = self.pos
         end = target_pos
         diff = end - start
@@ -140,7 +137,6 @@ class TentacleEnemy(BaseEnemy):
         self.path_index = 0
 
     def _update_separation_cache(self):
-        # Код без изменений
         separation = pygame.math.Vector2(0, 0)
         count = 0
         for other in enemies:
@@ -156,9 +152,7 @@ class TentacleEnemy(BaseEnemy):
             else: self.cached_separation_force = pygame.math.Vector2(0,0)
         else: self.cached_separation_force = pygame.math.Vector2(0,0)
 
-    # --- ИЗМЕНЕНИЯ В ДВИЖЕНИИ ---
     def _perform_movement(self, dt, dist_to_player):
-        # ... (код separation таймера без изменений) ...
         self.separation_check_timer -= 1
         if self.separation_check_timer <= 0:
             self._update_separation_cache()
@@ -170,11 +164,14 @@ class TentacleEnemy(BaseEnemy):
         too_close_dist = 100
         if self.archetype == 'combo': too_close_dist = 450
             
-        # УЧЕТ СКОРОСТИ БАФФА (self.speed_mult)
         current_speed_val = self.base_speed * self.speed_mult
 
         if dist_to_player < too_close_dist: 
-            direction = (self.player.pos - self.pos).normalize()
+            if dist_to_player > 0:
+                direction = (self.player.pos - self.pos).normalize()
+            else:
+                direction = pygame.math.Vector2(random.uniform(-1, 1), random.uniform(-1, 1)).normalize()
+            
             retreat_speed_mult = 0.9
             if self.archetype == 'combo': retreat_speed_mult *= 1.3 
             
@@ -202,18 +199,15 @@ class TentacleEnemy(BaseEnemy):
                 if move_vec.length_squared() > 0:
                     path_dir = move_vec.normalize()
                     final_dir = (path_dir + self.cached_separation_force).normalize()
-                    # Применяем множитель скорости
                     self.pos += final_dir * current_speed_val * dt * 60
                     self.is_moving = True
 
-    # --- ИЗМЕНЕНИЯ В ЛОГИКЕ ---
     def update_logic(self, dt):
         self.update_buffs()
-        dist_to_player = (self.player.pos - self.pos).length()
+        diff = self.player.pos - self.pos
+        dist_to_player = diff.length()
         self.is_moving = False
         
-        # Ускоряем откат способностей множителем кулдауна
-        # Если cooldown_mult = 2.0, то за 1 кадр проходит 2 единицы времени
         if self.lunge_timer_cd > 0: 
             self.lunge_timer_cd -= 1 * self.cooldown_mult
         if self.strike_timer_cd > 0: 
@@ -223,7 +217,6 @@ class TentacleEnemy(BaseEnemy):
             self._perform_movement(dt, dist_to_player)
 
         if self.state == self.STATE_CHASE:
-            # (Логика выбора атаки без изменений)
             if self.archetype == 'bruiser':
                 if dist_to_player <= self.STRIKE_RANGE and self.strike_timer_cd <= 0:
                     self._start_strike_attack()
@@ -248,15 +241,11 @@ class TentacleEnemy(BaseEnemy):
                     self._start_lunge_attack()
                     return
 
-        # УСКОРЯЕМ ТАЙМЕРЫ СОСТОЯНИЙ (self.state_timer)
-        
         elif self.state == self.STATE_PREPARE_LUNGE:
-            self.state_timer -= 1 * self.anim_mult # Ускорение
+            self.state_timer -= 1 * self.anim_mult 
             if self.archetype == 'jumper' and self.state_timer > self.LUNGE_PREP_TIME // 2:
                 self.lunge_target_pos = self.player.pos.copy()
             
-            # Визуальный прогресс считаем от базового времени, чтобы не дергалось
-            # Но так как таймер уменьшается быстрее, анимация ускорится
             progress = 1.0 - (self.state_timer / self.LUNGE_PREP_TIME)
             self.visual_radius = self.base_body_radius * (1.0 - 0.2 * progress)
             
@@ -266,7 +255,6 @@ class TentacleEnemy(BaseEnemy):
                 self.damage_dealt = False
                 jump_vec = self.lunge_target_pos - self.pos
                 if jump_vec.length() > 0: 
-                    # Скорость рывка тоже увеличиваем
                     self.lunge_velocity = jump_vec.normalize() * self.LUNGE_SPEED * self.speed_mult
                 else: 
                     self.lunge_velocity = pygame.math.Vector2(0, 0)
@@ -277,20 +265,18 @@ class TentacleEnemy(BaseEnemy):
             self.visual_radius = self.base_body_radius * 1.1
             if not self.damage_dealt:
                 if self.pos.distance_to(self.player.pos) < (self.radius + self.player.radius):
-                    # ПРИМЕНЕНИЕ УРОНА С БАФФОМ
                     self.player.take_damage(self.DAMAGE_LUNGE * self.damage_mult)
                     self.damage_dealt = True
                     self.shake_func(10)
             
             dist_to_target = self.pos.distance_to(self.lunge_target_pos)
-            # Условие выхода с поправкой на скорость
             if dist_to_target < (self.LUNGE_SPEED * self.speed_mult) * 1.5 or dist_to_target > 1000:
                 self.pos = self.lunge_target_pos
                 self.state = self.STATE_RECOVER
                 self.state_timer = 40 
 
         elif self.state == self.STATE_RECOVER:
-            self.state_timer -= 1 * self.anim_mult # Ускорение
+            self.state_timer -= 1 * self.anim_mult 
             self.visual_radius += (self.base_body_radius - self.visual_radius) * 0.1
             if self.state_timer <= 0:
                 self.state = self.STATE_CHASE
@@ -298,7 +284,6 @@ class TentacleEnemy(BaseEnemy):
                 if self.archetype == 'combo':
                     self.combo_primed = True
 
-        # АТАКА ЩУПАЛЬЦЕМ (УСКОРЕНИЕ)
         elif self.state == self.STATE_STRIKE_LIFT:
             self.state_timer += 1 * self.anim_mult
             if self.state_timer >= self.current_lift_time:
@@ -315,15 +300,25 @@ class TentacleEnemy(BaseEnemy):
 
         elif self.state == self.STATE_STRIKE_HIT:
             self.state_timer += 1 * self.anim_mult
+            
+            # Обычная проверка (ловим во время движения)
             if not self.damage_dealt:
                 tip_world_pos = self.pos + (self.strike_p3 - self.visual_center)
                 if tip_world_pos.distance_to(self.player.pos) < 40: 
-                    # ПРИМЕНЕНИЕ УРОНА С БАФФОМ
                     self.player.take_damage(self.DAMAGE_STRIKE * self.damage_mult)
                     self.damage_dealt = True
                     self.shake_func(15)
 
             if self.state_timer >= self.current_hit_time:
+                # --- ФИКС: Проверка финишной точки (если проскочили кадр) ---
+                if not self.damage_dealt:
+                    # В конце анимации кончик щупальца обязан быть в strike_target_pos
+                    if self.strike_target_pos.distance_to(self.player.pos) < 40:
+                        self.player.take_damage(self.DAMAGE_STRIKE * self.damage_mult)
+                        self.damage_dealt = True
+                        self.shake_func(15)
+                # ------------------------------------------------------------
+
                 self.state = self.STATE_STRIKE_RETRACT
                 self.state_timer = 0
 
@@ -342,7 +337,6 @@ class TentacleEnemy(BaseEnemy):
         if self.state != self.STATE_LUNGE:
             self.soft_collision()
 
-    # (Методы _start_lunge_attack, _start_strike_attack без изменений)
     def _start_lunge_attack(self):
         self.state = self.STATE_PREPARE_LUNGE
         self.state_timer = self.LUNGE_PREP_TIME
@@ -363,13 +357,10 @@ class TentacleEnemy(BaseEnemy):
             self.current_aim_time = self.BASE_TIME_AIM
 
     def update_animation(self):
-        # Ускоряем общую анимацию (покачивание и т.д.)
         anim_speed = 0.05 * self.anim_mult 
         if self.is_moving: anim_speed *= 2.5
         self.time += anim_speed
         
-        # ... (весь остальной код анимации такой же, логика интерполяции не меняется) ...
-        # Просто скопируйте оставшуюся часть метода из старого файла
         target_spread = 1.0
         target_extension = 0.0
         target_angle = 0.0
@@ -442,17 +433,6 @@ class TentacleEnemy(BaseEnemy):
                 'p2': (self.strike_p2.x, self.strike_p2.y),
                 'p3': (self.strike_p3.x, self.strike_p3.y)
             }
-        
-        # Если есть бафф, меняем цвет тела на красный
-        override_color = None
-        override_color_dark = None
-        if self.is_buffed:
-            override_color = (200, 50, 50) # Красный
-            override_color_dark = (100, 20, 20)
-
-        # Вызов отрисовки (добавим поддержку цветов если есть, или оставим стандартные)
-        # В вашем текущем монстр-рендере цвета зашиты в константы.
-        # Чтобы подсветить баффнутого монстра, можно просто рисовать ауру под ним
         
         if self.is_buffed:
              pygame.draw.circle(self.image, (255, 0, 0, 50), self.visual_center, 120 * self.scale)

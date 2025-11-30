@@ -1,4 +1,4 @@
-# scenes/game_scene.py
+# - game_scene.py (исходный файл)
 
 import pygame
 import sys
@@ -31,6 +31,7 @@ from rendering.archangel_render import draw_archangel_boss
 from rendering.portal_render import draw_divine_portal
 
 def complex_collision_check(sprite_a, sprite_b):
+    # ... (код функции collision check без изменений) ...
     def intersect(h1, h2):
         def get_shape(h):
             if isinstance(h, pygame.Rect): return ('rect', h)
@@ -87,7 +88,7 @@ class GameScene(Scene):
         start_pos = self.save_data["spawn_pos"]
         current_room = self.save_data["current_room"]
         
-        self.camera = Camera(2000, 3200) 
+        self.camera = Camera(2000, 3600) 
 
         self.player = Player(
             start_pos, 
@@ -107,64 +108,49 @@ class GameScene(Scene):
             complex_collision_check 
         )
 
-        # 1. СНАЧАЛА ЗАГРУЖАЕМ КОМНАТУ (Это создает стены и очищает старых врагов)
         self.world_manager.load_room(current_room, start_pos) 
         
-        
-        # 2. ТЕПЕРЬ СОЗДАЕМ ВАШИХ МОНСТРОВ
+        # 2. СПАВН МОНСТРОВ
+        GUARD_Y = 2750
+        CENTER_X = 1000
 
-        # ... после создания m1, m2, m3 ...
-
-# Тестовый спавн Мозгового Монстра
-        brain_pos = self.player.pos + pygame.math.Vector2(0, -300)
         BrainEnemy(
-           brain_pos,
-          self.player,
-          [all_sprites, enemies],
-          [all_sprites, particles],
+           (CENTER_X, GUARD_Y),
+           self.player,
+           [all_sprites, enemies],
+           [all_sprites, particles],
            self.screen_shake.shake
         )
         
-        # Монстр 1 (Слева)
-        pos_m1 = self.player.pos + pygame.math.Vector2(-350, 200) # Чуть отодвинул (-150), чтобы они сразу начали движение к игроку
         m1 = TentacleEnemy(
-            pos_m1, 
+            (CENTER_X - 200, GUARD_Y + 50), 
             self.player, 
             [all_sprites, enemies], 
             [all_sprites, particles], 
             self.screen_shake.shake
         )
-        m1.health = 150
-        # m1.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
-        m1.attention_state = 'FOCUS' 
-        m1.attention_timer = -99999 
+        m1.attention_state = 'FOCUS'
+        m1.attention_timer = -99999
 
-        # Монстр 2 (Справа)
-        pos_m2 = self.player.pos + pygame.math.Vector2(0, 400) # Чуть отодвинул (150)
-        m3 = TentacleEnemy(
-            pos_m2, 
+        m2 = TentacleEnemy(
+            (CENTER_X + 200, GUARD_Y + 50), 
             self.player, 
             [all_sprites, enemies], 
             [all_sprites, particles], 
             self.screen_shake.shake
         )
-        m3.health = 150
-        # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
-        m3.attention_state = 'FOCUS'
-        m3.attention_timer = -99999
-        pos_m3 = self.player.pos + pygame.math.Vector2(350, 200) # Чуть отодвинул (150)
+        m2.attention_state = 'FOCUS'
+        m2.attention_timer = -99999
+        
         m3 = TentacleEnemy(
-            pos_m3, 
+            (CENTER_X, GUARD_Y + 120), 
             self.player, 
             [all_sprites, enemies], 
             [all_sprites, particles], 
             self.screen_shake.shake
         )
-        m3.health = 150
-        # m2.base_speed = 0  <--- УДАЛИТЕ ИЛИ ЗАКОММЕНТИРУЙТЕ ЭТУ СТРОКУ
         m3.attention_state = 'FOCUS'
         m3.attention_timer = -99999
-        # --------------------------------------------
         
         self.boss = ArchangelBoss(-1000, -1000, self.player)
         self.boss.set_state(self.boss.STATE_HIDDEN) 
@@ -175,17 +161,41 @@ class GameScene(Scene):
         self.death_timer = 0
         
         self.cave_bg = generate_cave_background()
+        
+        # --- ТАЙМЕР ПРОХОЖДЕНИЯ ---
+        self.game_start_time = 0
+        self.final_time_ms = 0
+        self.timer_running = False
+        
+        # Таймер для задержки ИИ
+        self.start_delay_timer = 90
+        for enemy in enemies:
+            enemy.ai_active = False
 
     def enter(self):
         print("Сцена игры: Старт")
-        # Запускаем фоновую музыку подземелья с плавным входом (например, 2 сек)
         self.assets.play_music('dungeon', fade_ms=2000)
+        
+        # --- СТАРТ ТАЙМЕРА ---
+        self.game_start_time = pygame.time.get_ticks()
+        self.timer_running = True
+        
+        # --- НЕУЯЗВИМОСТЬ НА СТАРТЕ ---
+        self.player.invulnerable = True
+        self.player.invul_timer = pygame.time.get_ticks()
+        # Временно даем 1.5 секунды (1500 мс), обычное значение 200
+        self.player.invul_duration = 1500 
         
     def on_player_death(self):
         if not self.game_over:
             print("Игрок мертв. Запускаем Game Over таймер.")
             self.game_over = True
             self.death_timer = 60 
+            
+            # Останавливаем таймер при смерти
+            if self.timer_running:
+                self.final_time_ms = pygame.time.get_ticks() - self.game_start_time
+                self.timer_running = False
 
     def handle_input(self, events):
         if self.game_over: return 
@@ -222,6 +232,25 @@ class GameScene(Scene):
             self.screen_shake.update(dt)
             return 
 
+        # Логика задержки ИИ
+        if self.start_delay_timer > 0:
+            self.start_delay_timer -= 1
+            if self.start_delay_timer <= 0:
+                for enemy in enemies:
+                    enemy.ai_active = True
+                    
+        # --- СБРОС ДЛИТЕЛЬНОСТИ НЕУЯЗВИМОСТИ ---
+        # Если неуязвимость кончилась, возвращаем длительность к стандарту (200 мс)
+        if not self.player.invulnerable and self.player.invul_duration == 1500:
+            self.player.invul_duration = 200
+
+        # --- ПРОВЕРКА ПОБЕДЫ ---
+        if self.timer_running:
+            # Если босс умер (перешел в состояние смерти), останавливаем таймер
+            if self.boss.state == self.boss.STATE_DEATH:
+                self.final_time_ms = pygame.time.get_ticks() - self.game_start_time
+                self.timer_running = False
+
         self.world_manager.update(dt) 
         self.player.update_custom(dt, enemies, bullets, all_sprites, self.camera.offset) 
         
@@ -233,27 +262,16 @@ class GameScene(Scene):
         self.screen_shake.update(dt)
         self.check_collisions()
 
-        # --- ЛОГИКА ТРИГГЕРОВ (Обновленные координаты) ---
-        
-        # 1. Ворота (Y ~ 2000)
-        GATE_TRIGGER_Y = 2200 # Открываем, когда подходим снизу
+        GATE_TRIGGER_Y = 2400 
         if self.player.pos.y < GATE_TRIGGER_Y:
             for gate in self.world_manager.gates:
                 gate.open()
 
-        # 2. Босс (Y ~ 2000 - вход)
         BOSS_TRIGGER_Y = 1500 
         
         if self.boss.state == self.boss.STATE_HIDDEN and self.player.pos.y < BOSS_TRIGGER_Y:
             print("Триггер босса сработал!")
-            
-            # --- ВАЖНО: Устанавливаем точку назначения ---
-            # Было (1000, 1000) - это слишком низко.
-            # Ставим (1000, 600) - это выше по экрану (меньше Y).
-            # Босс появится еще выше (в портале) и спустится сюда.
-            self.boss.spawn_pos = pygame.math.Vector2(1000, 1000)
-            
-            # Запускаем интро
+            self.boss.spawn_pos = pygame.math.Vector2(1000, 1000) 
             self.boss.spawn_boss()
             self.assets.stop_music(fade_ms=600)
             self.assets.play_music('boss', fade_ms=600)
@@ -282,10 +300,8 @@ class GameScene(Scene):
         screen.blit(self.cave_bg, (total_offset.x - 20, total_offset.y - 20))
         self.world_manager.draw_map(screen, total_offset)
         
-        # Рисуем портал
         if self.boss.state == self.boss.STATE_INTRO:
             portal_pos = self.boss.spawn_pos + total_offset
-            # Портал рисуется выше целевой точки
             portal_draw_pos = (portal_pos.x, portal_pos.y - self.boss.portal_offset_y)
             draw_divine_portal(screen, portal_draw_pos, self.boss.intro_portal_progress, self.boss.time_ticks)
         
@@ -325,7 +341,6 @@ class GameScene(Scene):
                 alpha=getattr(self.boss, 'current_alpha', 255),
                 is_final_attack=(self.boss.state == self.boss.STATE_CHAOS_BARRAGE),
                 death_params=death_data,
-                # НОВЫЕ ПАРАМЕТРЫ:
                 dash_prep_progress=getattr(self.boss, 'dash_prep_progress', 0.0),
                 dash_target_pos=dash_target_screen_pos
             )
@@ -350,16 +365,36 @@ class GameScene(Scene):
         skill_x = 20
         skill_y = 20 + 80 + 10 
         
-        # E - Flurry
         draw_skill_icon(screen, self.player.skill_manager.skills['flurry'], (skill_x, skill_y), self.assets.get_font_ui())
-        
-        # Q - Cloud Daggers (НОВОЕ)
         draw_dagger_icon(screen, self.player.skill_manager.skills['cloud'], (skill_x + 60, skill_y), self.assets.get_font_ui())
-        
-        # Space - Dash (Сдвигаем правее)
         draw_dash_icon(screen, self.player, (skill_x + 120, skill_y), self.assets.get_font_ui())
-        
         
         for sprite in particles:
             if hasattr(sprite, 'draw_custom'):
                 sprite.draw_custom(screen, total_offset)
+
+        # --- ОТРИСОВКА ТАЙМЕРА (ПОВЕРХ ВСЕГО) ---
+        if self.timer_running:
+            current_ms = pygame.time.get_ticks() - self.game_start_time
+        else:
+            current_ms = self.final_time_ms
+            
+        minutes = current_ms // 60000
+        seconds = (current_ms // 1000) % 60
+        millis = current_ms % 1000
+        
+        time_str = f"{minutes:02}:{seconds:02}.{millis:03}"
+        
+        # Рисуем по центру сверху
+        font = self.assets.get_font_ui()
+        if font:
+            # Тень
+            text_shadow = font.render(time_str, True, (0, 0, 0))
+            text_rect_s = text_shadow.get_rect(center=(WIDTH // 2 + 2, 32))
+            screen.blit(text_shadow, text_rect_s)
+            
+            # Текст
+            color = (255, 255, 255) if self.timer_running else (255, 215, 0) # Золотой, если стоп
+            text_surf = font.render(time_str, True, color)
+            text_rect = text_surf.get_rect(center=(WIDTH // 2, 30))
+            screen.blit(text_surf, text_rect)
