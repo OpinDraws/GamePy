@@ -14,7 +14,7 @@ ASSETS_DIR = os.path.join(BASE_DIR, 'assets')
 if not pygame.display.get_init():
     pygame.display.init()
 
-WIDTH, HEIGHT = 1980, 1024
+WIDTH, HEIGHT = 1090, 720
 # Если нужно реальное разрешение монитора, можно раскомментировать:
 # info = pygame.display.Info()
 # WIDTH, HEIGHT = info.current_w, info.current_h
