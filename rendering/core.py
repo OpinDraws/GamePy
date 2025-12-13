@@ -33,6 +33,12 @@ def get_bezier_points(start, end, control, segments=10):
     """
     Генерирует точки квадратичной кривой Безье.
     """
+    # ДОБАВЬТЕ ЭТИ СТРОКИ:
+    start = pygame.math.Vector2(start)
+    end = pygame.math.Vector2(end)
+    control = pygame.math.Vector2(control)
+    # ------------------
+    
     points = []
     for i in range(segments + 1):
         t = i / segments

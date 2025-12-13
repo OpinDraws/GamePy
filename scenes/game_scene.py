@@ -114,43 +114,7 @@ class GameScene(Scene):
         GUARD_Y = 2750
         CENTER_X = 1000
 
-        BrainEnemy(
-           (CENTER_X, GUARD_Y),
-           self.player,
-           [all_sprites, enemies],
-           [all_sprites, particles],
-           self.screen_shake.shake
-        )
         
-        m1 = TentacleEnemy(
-            (CENTER_X - 200, GUARD_Y + 50), 
-            self.player, 
-            [all_sprites, enemies], 
-            [all_sprites, particles], 
-            self.screen_shake.shake
-        )
-        m1.attention_state = 'FOCUS'
-        m1.attention_timer = -99999
-
-        m2 = TentacleEnemy(
-            (CENTER_X + 200, GUARD_Y + 50), 
-            self.player, 
-            [all_sprites, enemies], 
-            [all_sprites, particles], 
-            self.screen_shake.shake
-        )
-        m2.attention_state = 'FOCUS'
-        m2.attention_timer = -99999
-        
-        m3 = TentacleEnemy(
-            (CENTER_X, GUARD_Y + 120), 
-            self.player, 
-            [all_sprites, enemies], 
-            [all_sprites, particles], 
-            self.screen_shake.shake
-        )
-        m3.attention_state = 'FOCUS'
-        m3.attention_timer = -99999
         
         self.boss = ArchangelBoss(-1000, -1000, self.player)
         self.boss.set_state(self.boss.STATE_HIDDEN) 

@@ -37,10 +37,10 @@ class SlashFlurry:
         self.owner = owner
         self.cooldown = 9000     
         self.duration = 400      
-        self.damage = 280        
+        self.damage = 2880        
         self.radius = 140         
         self.hitbox_radius = 220
-        self.timer = -2000       
+        self.timer = -10000       
         self.active_timer = 0    
         self.is_active = False
         self.hit_enemies = set()
