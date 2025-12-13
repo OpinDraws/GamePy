@@ -72,7 +72,7 @@ class GameScene(Scene):
         super().__init__(manager)
         self.assets = AssetManager()
         
-        print("Сцена игры: Инициализация мира...")
+        print("Сцена игры: Инициализация мира для БИЛДА...")
         
         all_sprites.empty()
         bullets.empty()
@@ -85,7 +85,10 @@ class GameScene(Scene):
         if self.save_data is None:
             self.save_data = get_default_save_data()
         
-        start_pos = self.save_data["spawn_pos"]
+        # --- 1. ТОЧКА СПАВНА (ПРЕЗЕНТАЦИЯ) ---
+        # Ставим игрока в нижнюю комнату (координаты X=1000, Y=3100)
+        start_pos = [1000, 3100] 
+        
         current_room = self.save_data["current_room"]
         
         self.camera = Camera(2000, 3600) 
@@ -110,12 +113,26 @@ class GameScene(Scene):
 
         self.world_manager.load_room(current_room, start_pos) 
         
-        # 2. СПАВН МОНСТРОВ
-        GUARD_Y = 2750
-        CENTER_X = 1000
-
+        # --- 2. РУЧНОЙ СПАВН ВРАГОВ ---
+        # Группы: all_sprites (для отрисовки), enemies (для логики и коллизий)
+        mob_groups = [all_sprites, enemies]
+        
+        # Спавним 1 Мозга (BrainEnemy) чуть выше игрока
+        BrainEnemy(
+            (1000, 2900), 
+            self.player, 
+            mob_groups, 
+            [all_sprites, particles], 
+            self.screen_shake.shake
+        )
+        
+        # Спавним 3 Щупальца (TentacleEnemy) вокруг
+        TentacleEnemy((900, 3000), self.player, mob_groups, particles, self.screen_shake.shake)
+        TentacleEnemy((1100, 3000), self.player, mob_groups, particles, self.screen_shake.shake)
+        TentacleEnemy((1000, 3300), self.player, mob_groups, particles, self.screen_shake.shake)
         
         
+        # Инициализация босса (оставляем скрытым)
         self.boss = ArchangelBoss(-1000, -1000, self.player)
         self.boss.set_state(self.boss.STATE_HIDDEN) 
         self.boss.invulnerable = True
@@ -126,13 +143,16 @@ class GameScene(Scene):
         
         self.cave_bg = generate_cave_background()
         
-        # --- ТАЙМЕР ПРОХОЖДЕНИЯ ---
+        # Таймеры
         self.game_start_time = 0
         self.final_time_ms = 0
         self.timer_running = False
         
-        # Таймер для задержки ИИ
-        self.start_delay_timer = 90
+        # --- 3. НАСТРОЙКА ЗАДЕРЖКИ АТАКИ ---
+        # 60 кадров = 1 секунда (при 60 FPS)
+        self.start_delay_timer = 60
+        
+        # Принудительно отключаем ИИ всем врагам на старте
         for enemy in enemies:
             enemy.ai_active = False
 

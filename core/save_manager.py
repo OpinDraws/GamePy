@@ -7,8 +7,8 @@ SAVE_FILE = os.path.join(BASE_DIR, 'save_game.json')
 def get_default_save_data():
     """Возвращает начальное состояние новой игры."""
     return {
-        "hp": 15000,
-        "max_hp": 15000,
+        "hp": 200,
+        "max_hp": 200,
         "current_room": "boss_arena",
         # ИЗМЕНЕНИЕ: Спавн внизу стартовой комнаты (Y=3500)
         "spawn_pos": [1000, 1500], 
