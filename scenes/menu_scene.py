@@ -28,6 +28,8 @@ class MenuScene(Scene):
                 elif event.key == pygame.K_ESCAPE:
                     pygame.quit()
                     sys.exit()
+                
+                
 
     def update(self, dt):
         pass
@@ -35,7 +37,7 @@ class MenuScene(Scene):
     def draw(self, surface):
         surface.fill(COLOR_BG)
         
-        title_text = "Gothic Procedural Arena"
+        title_text = "Bloodbound ascent"
         title_surf = self.title_font.render(title_text, True, (220, 50, 60)) 
         title_rect = title_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 60))
         surface.blit(title_surf, title_rect)

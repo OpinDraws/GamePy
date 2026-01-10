@@ -286,7 +286,7 @@ def draw_player_hud(screen, player, font_name, font_title):
         pygame.draw.circle(screen, C_SILVER, (cx, cy), 4)
 
     # 2. Текст (Имя)
-    name_text = "Алукард" # Или любое имя героя
+    name_text = "Вампир" # Или любое имя героя
     surf_name = font_name.render(name_text, True, (220, 220, 230))
     
     # Позиционирование (Справа от портрета)
