@@ -19,8 +19,8 @@ def main():
     except Exception as e:
         print(f"Ошибка инициализации звука: {e}")
 
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("Gothic Procedural Arena - Refactored")
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN | pygame.SCALED)
+    pygame.display.set_caption("Bloodbound ascent - Refactored")
     clock = pygame.time.Clock()
 
     # 2. Загрузка ресурсов через синглтон AssetManager
